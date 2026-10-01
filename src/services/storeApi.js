@@ -1,33 +1,21 @@
 import { supabase } from '../lib/supabase';
+import { fetchCatalogPage, mapCatalogRow } from './catalogApi';
 
 const money = (value) => Number(value ?? 0);
 
 export function mapProduct(row) {
-  return {
-    ...row,
-    secondaryImage: row.secondary_image,
-    price: `$${money(row.price).toFixed(2)}`,
-    sizes: (row.product_variants ?? []).map((variant) => ({
-      id: variant.id,
-      size: variant.size,
-      price: `$${money(variant.price).toFixed(2)}`,
-      inStock: variant.in_stock,
-    })),
-  };
+  return mapCatalogRow(row);
 }
 
-export async function fetchProducts() {
+export async function fetchProducts(options = {}) {
   if (!supabase) return null;
-  const { data, error } = await supabase
-    .from('products')
-    .select('*, product_variants(*)')
-    .eq('is_active', true)
-    .order('created_at', { ascending: true });
-  if (error) {
+  try {
+    const page = await fetchCatalogPage({ page: 1, pageSize: 48, ...options });
+    return page.products;
+  } catch (error) {
     console.warn('Supabase product fetch failed:', error.message);
     return null;
   }
-  return data?.map(mapProduct) ?? [];
 }
 
 export async function saveProfile(user, preferredSize) {

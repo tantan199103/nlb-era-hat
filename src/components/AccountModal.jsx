@@ -8,7 +8,8 @@ export default function AccountModal({
   onLogin, 
   onLogout,
   userPreferredSize,
-  onUpdatePreferredSize 
+  onUpdatePreferredSize,
+  onOpenAdmin
 }) {
   const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'settings' | 'points'
   const [email, setEmail] = useState('');
@@ -178,6 +179,21 @@ export default function AccountModal({
                 </div>
               )}
 
+              {/* Staff shortcut */}
+              <div className="pt-3 border-t border-[#262626]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenAdmin?.();
+                  }}
+                  className="w-full py-2.5 px-3 bg-[#1e1e1e] hover:bg-[#ff3b30] border border-[#2e2e2e] text-zinc-300 hover:text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <ShieldCheck size={15} className="text-[#ff3b30]" />
+                  <span>OPEN STORE ADMIN CONTROL ROOM</span>
+                </button>
+              </div>
+
             </div>
           ) : (
             <div className="space-y-6">
@@ -243,6 +259,18 @@ export default function AccountModal({
                 >
                   Join Access Pass for Free with 1-Click &rarr;
                 </button>
+                <div className="pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenAdmin?.();
+                    }}
+                    className="text-xs text-zinc-500 hover:text-[#ff3b30] font-bold"
+                  >
+                    ⚡ Store Staff: Access Admin Control Room
+                  </button>
+                </div>
               </div>
             </div>
           )}

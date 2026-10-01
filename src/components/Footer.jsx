@@ -102,6 +102,7 @@ export default function Footer({ onNavigate }) {
               <li><button onClick={() => onNavigate ? onNavigate('stores') : null} className="hover:text-white transition-colors bg-transparent border-none cursor-pointer text-left text-gray-400">Store Locator & Flagship</button></li>
               <li><button onClick={() => onNavigate ? onNavigate('collections') : null} className="hover:text-white transition-colors bg-transparent border-none cursor-pointer text-left text-gray-400">All Available Drops</button></li>
               <li><button onClick={() => onNavigate ? onNavigate('calendar') : null} className="hover:text-white transition-colors bg-transparent border-none cursor-pointer text-left text-gray-400">Drop Release Schedule</button></li>
+              <li><button onClick={() => onNavigate ? onNavigate('admin') : null} className="text-[#ff3b30] hover:underline font-bold transition-colors bg-transparent border-none cursor-pointer text-left flex items-center gap-1">⚡ Admin Control Room</button></li>
             </ul>
           </div>
 
