@@ -8,16 +8,6 @@ alter table public.profiles add constraint profiles_role_check check (role in ('
 create index if not exists products_category_active_idx on public.products(category, is_active);
 create index if not exists products_group_idx on public.products((metadata->>'source_product_group'));
 create index if not exists products_tags_idx on public.products using gin(tags);
-create index if not exists products_search_idx on public.products using gin (
-  to_tsvector(
-    'simple',
-    coalesce(title, '') || ' ' || coalesce(handle, '') || ' ' ||
-    coalesce(team, '') || ' ' || coalesce(league, '') || ' ' ||
-    coalesce(silhouette, '') || ' ' || array_to_string(tags, ' ') || ' ' ||
-    coalesce(metadata->>'source_product_group', '') || ' ' ||
-    coalesce(metadata->>'source_sku', '')
-  )
-);
 
 create table if not exists public.store_menus (
   id text primary key,
