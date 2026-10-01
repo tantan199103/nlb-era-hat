@@ -236,6 +236,19 @@ async function upsertBatches(client, table, rows, onConflict) {
   }
 }
 
+async function deactivateNonHatProducts(client) {
+  // This destination is a hat-only storefront. Keep legacy rows recoverable,
+  // but prevent accessories or other categories from leaking into the public catalog.
+  const { data, error } = await client
+    .from('products')
+    .update({ is_active: false, updated_at: new Date().toISOString() })
+    .neq('category', 'hats')
+    .eq('is_active', true)
+    .select('id');
+  if (error) throw new Error(`Destination non-hat cleanup failed: ${error.message}`);
+  if (data?.length) console.log(`Deactivated non-hat products: ${data.length}.`);
+}
+
 async function main() {
   const sourceEnv = parseEnvFile(SOURCE_ENV_FILE);
   const sourceUrl = process.env.CUSTOM_POD_SUPABASE_URL || sourceEnv.SUPABASE_URL || sourceEnv.VITE_SUPABASE_URL;
@@ -264,7 +277,8 @@ async function main() {
 
   await upsertBatches(target, 'products', targetProducts.map(({ _source_id, ...product }) => product), 'id');
   await upsertBatches(target, 'product_variants', targetVariants, 'id');
-  console.log('Hat catalog sync completed. Existing destination rows were not deleted.');
+  await deactivateNonHatProducts(target);
+  console.log('Hat catalog sync completed. Existing hat rows were retained; non-hat rows are inactive.');
 }
 
 main().catch((error) => {
