@@ -15,7 +15,8 @@ export default function AdminOverview({
   currency = 'USD' 
 }) {
   const totalRevenue = orders.reduce((sum, o) => sum + (o.grandTotal || 0), 0) + 24750.0;
-  const publishedCount = products.filter(p => !p.status || p.status === 'PUBLISHED').length;
+  const publishedCount = products.filter(p => (!p.status || p.status === 'PUBLISHED') && (p.source1688Status || 'PENDING') === 'MATCHED').length;
+  const sourceQueueCount = products.filter(p => (p.source1688Status || 'PENDING') !== 'MATCHED').length;
   const pendingOrdersCount = orders.filter(o => o.fulfillmentStatus !== 'DELIVERED').length;
   const lowStockCount = products.filter(p => p.sizes?.some(s => s.inStock && Math.random() > 0.7)).length;
 
@@ -82,6 +83,13 @@ export default function AdminOverview({
           <div className="admin-kpi-value">{collections.length}</div>
           <div className="admin-kpi-note">Playing with Fire, Blue Heaven, MiLB</div>
         </div>
+
+        {/* 1688 source queue */}
+        <button onClick={() => onNavigateTab('products')} className="admin-kpi-card border-l-4 border-l-amber-400 text-left transition-colors hover:bg-[#181818]">
+          <span className="admin-kpi-label">1688 SOURCE QUEUE</span>
+          <div className="admin-kpi-value text-amber-300">{sourceQueueCount}</div>
+          <div className="admin-kpi-note">Only MATCHED listings can sell</div>
+        </button>
       </div>
 
       {/* Two Column Section: Recent Orders & Top Drops */}

@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
   Search, Plus, Trash2, Copy, Edit3, Check, X, Filter, 
-  Flame, ExternalLink, Image, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw
+  Flame, ExternalLink, Image, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw,
+  ShieldCheck, Link2, CircleAlert
 } from 'lucide-react';
 import { formatPrice } from '../utils/currency';
 import { supabase } from '../lib/supabase';
@@ -13,13 +14,24 @@ export default function AdminProducts({
   onSaveProduct,
   onDeleteProduct,
   onToggleProductStatus,
+  onVerifyProduct1688,
   currency = 'USD',
   onOpenPDP,
 }) {
   const [query, setQuery] = useState('');
   const [selectedLeague, setSelectedLeague] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [selectedSourceStatus, setSelectedSourceStatus] = useState('ALL');
   const [editingProduct, setEditingProduct] = useState(null);
+  const [verificationProduct, setVerificationProduct] = useState(null);
+  const [verificationForm, setVerificationForm] = useState({
+    status: 'MATCHED',
+    url: '',
+    title: '',
+    score: '',
+    imageUrl: '',
+    note: '',
+  });
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [catalogPage, setCatalogPage] = useState(1);
@@ -55,10 +67,12 @@ export default function AdminProducts({
       
       const matchLeague = selectedLeague === 'ALL' || p.league?.toUpperCase() === selectedLeague.toUpperCase();
       const matchStatus = selectedStatus === 'ALL' || (p.status || 'PUBLISHED') === selectedStatus;
+      const matchSourceStatus = selectedSourceStatus === 'ALL'
+        || (p.source1688Status || 'PENDING') === selectedSourceStatus;
 
-      return matchQuery && matchLeague && matchStatus;
+      return matchQuery && matchLeague && matchStatus && matchSourceStatus;
     });
-  }, [products, query, selectedLeague, selectedStatus]);
+  }, [products, query, selectedLeague, selectedStatus, selectedSourceStatus]);
 
   useEffect(() => {
     if (!supabase) { setRemoteRows(null); return undefined; }
@@ -72,6 +86,7 @@ export default function AdminProducts({
       category: 'hats',
       includeInactive: true,
       status: selectedStatus === 'ALL' ? '' : selectedStatus,
+      sourceStatus: selectedSourceStatus === 'ALL' ? '' : selectedSourceStatus,
     }).then((result) => {
       if (cancelled) return;
       setRemoteRows(result.products);
@@ -83,9 +98,9 @@ export default function AdminProducts({
       if (!cancelled) setRemoteLoading(false);
     });
     return () => { cancelled = true; };
-  }, [catalogPage, query, selectedLeague, selectedStatus, refreshKey]);
+  }, [catalogPage, query, selectedLeague, selectedStatus, selectedSourceStatus, refreshKey]);
 
-  useEffect(() => { setCatalogPage(1); }, [query, selectedLeague, selectedStatus]);
+  useEffect(() => { setCatalogPage(1); }, [query, selectedLeague, selectedStatus, selectedSourceStatus]);
 
   const displayedProducts = remoteRows ?? filteredProducts;
   const displayedCount = remoteRows ? remoteCount : filteredProducts.length;
@@ -103,7 +118,7 @@ export default function AdminProducts({
       thumbnail: 'https://www.lidshd.com/cdn/shop/files/23235133_04.png?v=1790339447&width=2048',
       secondaryImage: 'https://www.lidshd.com/cdn/shop/files/23235133_03.png?v=1790339447&width=2048',
       category: 'hats',
-      status: 'PUBLISHED'
+      status: 'DRAFT'
     });
     setIsNewModalOpen(true);
   };
@@ -141,7 +156,7 @@ export default function AdminProducts({
       onSaveProducts?.([saved, ...products.filter((product) => product.id !== saved.id)]);
       setRemoteRows((rows) => rows ? [saved, ...rows.filter((product) => product.id !== saved.id)].slice(0, 24) : rows);
       setIsNewModalOpen(false);
-      setNotice(`New drop "${saved.title}" added to catalog & live storefront!`);
+      setNotice(`New drop "${saved.title}" đã lưu ở hàng chờ — cần xác minh 1688 trước khi bán.`);
       setRefreshKey((value) => value + 1);
     } catch (error) {
       setNotice(`Could not save product: ${error.message}`);
@@ -155,6 +170,12 @@ export default function AdminProducts({
       id: Date.now(),
       title: `${prod.title} (Draft Copy)`,
       status: 'DRAFT',
+      source1688Status: 'PENDING',
+      source1688Url: '',
+      source1688Title: '',
+      source1688Score: null,
+      source1688ImageUrl: '',
+      source1688Note: '',
       handle: undefined,
       sizes: (prod.sizes || []).map((variant) => ({ ...variant, id: undefined })),
     };
@@ -198,6 +219,60 @@ export default function AdminProducts({
     setTimeout(() => setNotice(''), 3000);
   };
 
+  const open1688Search = (product) => {
+    // 1688's image-search upload is protected by its own login/CAPTCHA flow,
+    // so the admin completes the upload in the opened tab and then records
+    // the chosen result in the verification form below.
+    if (product.thumbnail) window.open(product.thumbnail, '_blank', 'noopener,noreferrer');
+    window.open('https://air.1688.com/kapp/1688-search/pc-image-search/?tab=imageSearch', '_blank', 'noopener,noreferrer');
+    setNotice('Đã mở ảnh sản phẩm và Image Search 1688 ở tab mới. Chọn listing tương ứng rồi dán URL vào bước xác minh.');
+    setTimeout(() => setNotice(''), 6000);
+  };
+
+  const openVerification = (product) => {
+    setVerificationProduct(product);
+    setVerificationForm({
+      status: product.source1688Status || 'PENDING',
+      url: product.source1688Url || '',
+      title: product.source1688Title || '',
+      score: product.source1688Score == null ? '' : String(product.source1688Score),
+      imageUrl: product.source1688ImageUrl || '',
+      note: product.source1688Note || '',
+    });
+  };
+
+  const handleSaveVerification = async (event) => {
+    event.preventDefault();
+    if (!verificationProduct) return;
+    if (verificationForm.status === 'MATCHED' && !verificationForm.url.trim()) {
+      setNotice('Không thể MATCHED nếu chưa có URL listing 1688.');
+      return;
+    }
+    try {
+      const saved = await onVerifyProduct1688?.(verificationProduct, verificationForm)
+        || {
+          ...verificationProduct,
+          source1688Status: verificationForm.status,
+          source1688Url: verificationForm.url,
+          source1688Title: verificationForm.title,
+          source1688Score: verificationForm.score === '' ? null : Number(verificationForm.score),
+          source1688ImageUrl: verificationForm.imageUrl,
+          source1688Note: verificationForm.note,
+          source1688CheckedAt: new Date().toISOString(),
+          is_active: verificationForm.status === 'MATCHED',
+          status: verificationForm.status === 'MATCHED' ? 'PUBLISHED' : 'DRAFT',
+        };
+      onSaveProducts?.(products.map((product) => product.id === saved.id ? saved : product));
+      setRemoteRows((rows) => rows ? rows.map((product) => product.id === saved.id ? saved : product) : rows);
+      setVerificationProduct(null);
+      setNotice(`${saved.title || verificationProduct.title}: đã lưu trạng thái 1688 ${verificationForm.status}.`);
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      setNotice(`Không lưu được xác minh 1688: ${error.message}`);
+    }
+    setTimeout(() => setNotice(''), 5000);
+  };
+
   return (
     <div className="admin-content animate-fade-in space-y-6">
       
@@ -207,7 +282,7 @@ export default function AdminProducts({
           <div className="admin-intro-eyebrow">CATALOG / INVENTORY MANAGEMENT</div>
           <h1>PRODUCT LISTINGS</h1>
           <p className="admin-intro-desc">
-            Manage authentic New Era 59FIFTY fitted drops, pins, custom chains, pricing, and live inventory allocation.
+            Quản lý catalog mũ, tồn kho và kiểm tra nguồn 1688. Listing chưa có mẫu đối chiếu sẽ luôn bị ẩn khỏi storefront.
           </p>
         </div>
 
@@ -273,6 +348,21 @@ export default function AdminProducts({
             </select>
           </div>
 
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-bold text-gray-500 uppercase">1688:</span>
+            <select
+              value={selectedSourceStatus}
+              onChange={(e) => setSelectedSourceStatus(e.target.value)}
+              className="bg-[#1a1a1a] border border-[#333333] rounded px-2.5 py-1.5 text-xs text-white font-bold focus:outline-none"
+            >
+              <option value="ALL">All checks</option>
+              <option value="PENDING">Pending</option>
+              <option value="REVIEW">Review</option>
+              <option value="MATCHED">Matched / sellable</option>
+              <option value="NOT_FOUND">Not found</option>
+            </select>
+          </div>
+
           <span className="text-xs text-gray-400 font-semibold ml-2">
             {remoteLoading ? 'Loading catalog…' : `Showing ${displayedCount.toLocaleString()} of ${displayedTotal.toLocaleString()}`}
           </span>
@@ -291,7 +381,7 @@ export default function AdminProducts({
                 <th>Silhouette</th>
                 <th>Price</th>
                 <th>Sizes Available</th>
-                <th>Status</th>
+                <th>Publish / 1688</th>
                 <th className="text-right">Actions</th>
               </tr>
             </thead>
@@ -346,21 +436,49 @@ export default function AdminProducts({
 
                     {/* Status Toggle */}
                     <td>
-                      <button
-                        onClick={() => handleToggleStatus(p)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-black uppercase cursor-pointer transition-colors ${
-                          (p.status || 'PUBLISHED') === 'PUBLISHED'
-                            ? 'bg-[#1b2b1d] text-[#3ed660] border border-[#2e5236]'
-                            : 'bg-[#291717] text-[#ff3b30] border border-[#442222]'
-                        }`}
-                      >
-                          {p.status || (p.is_active === false ? 'DRAFT' : 'PUBLISHED')}
-                      </button>
+                      <div className="flex flex-col items-start gap-1">
+                        <button
+                          onClick={() => handleToggleStatus(p)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-black uppercase cursor-pointer transition-colors ${
+                            (p.status || 'PUBLISHED') === 'PUBLISHED'
+                              ? 'bg-[#1b2b1d] text-[#3ed660] border border-[#2e5236]'
+                              : 'bg-[#291717] text-[#ff3b30] border border-[#442222]'
+                          }`}
+                        >
+                            {p.status || (p.is_active === false ? 'DRAFT' : 'PUBLISHED')}
+                        </button>
+                        <button
+                          onClick={() => openVerification(p)}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black uppercase cursor-pointer transition-colors ${
+                            (p.source1688Status || 'PENDING') === 'MATCHED'
+                              ? 'bg-emerald-950/50 text-emerald-300 border border-emerald-800/70'
+                              : (p.source1688Status || 'PENDING') === 'NOT_FOUND'
+                                ? 'bg-red-950/50 text-red-300 border border-red-800/70'
+                                : 'bg-amber-950/50 text-amber-300 border border-amber-800/70'
+                          }`}
+                        >
+                          <ShieldCheck size={11} /> {p.source1688Status || 'PENDING'}
+                        </button>
+                      </div>
                     </td>
 
                     {/* Actions */}
                     <td className="text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => open1688Search(p)}
+                          className="p-1.5 text-amber-300 hover:text-white bg-amber-950/40 hover:bg-amber-900/60 rounded transition-colors"
+                          title="Tìm ảnh sản phẩm trên 1688"
+                        >
+                          <Image size={13} />
+                        </button>
+                        <button
+                          onClick={() => openVerification(p)}
+                          className="p-1.5 text-emerald-300 hover:text-white bg-emerald-950/40 hover:bg-emerald-900/60 rounded transition-colors"
+                          title="Xác nhận kết quả 1688"
+                        >
+                          <ShieldCheck size={13} />
+                        </button>
                         <button
                           onClick={() => onOpenPDP && onOpenPDP(p)}
                           className="p-1.5 text-gray-400 hover:text-white bg-[#1a1a1a] hover:bg-[#252525] rounded transition-colors"
@@ -398,6 +516,74 @@ export default function AdminProducts({
           <div className="flex gap-2">
             <button disabled={catalogPage <= 1 || remoteLoading} onClick={() => setCatalogPage((current) => Math.max(1, current - 1))} className="flex items-center gap-1 rounded border border-[#333] px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-40"><ChevronLeft size={14} /> Previous</button>
             <button disabled={catalogPage >= remotePages || remoteLoading} onClick={() => setCatalogPage((current) => Math.min(remotePages, current + 1))} className="flex items-center gap-1 rounded border border-[#333] px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-40">Next <ChevronRight size={14} /></button>
+          </div>
+        </div>
+      )}
+
+      {verificationProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-[#141414] border border-[#2e2e2e] rounded-xl max-w-[680px] w-full p-6 shadow-2xl space-y-5">
+            <div className="flex items-start justify-between gap-4 pb-3 border-b border-[#252525]">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">SOURCE CHECK / 1688 IMAGE SEARCH</div>
+                <h3 className="mt-1 font-display text-xl font-black text-white uppercase tracking-tight">VERIFY BEFORE SELLING</h3>
+                <p className="mt-1 text-xs leading-5 text-zinc-400">Chỉ trạng thái MATCHED mới được phép bật Published và xuất hiện ở storefront.</p>
+              </div>
+              <button onClick={() => setVerificationProduct(null)} className="text-gray-400 hover:text-white" aria-label="Close">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex gap-4 rounded-lg border border-[#292929] bg-[#101010] p-3">
+              <img src={verificationProduct.thumbnail} alt={verificationProduct.title} className="h-20 w-20 rounded border border-[#333] bg-[#181818] object-contain p-1" />
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-white">{verificationProduct.title}</div>
+                <div className="mt-1 text-[11px] text-zinc-500">Product ID: {verificationProduct.id}</div>
+                <button type="button" onClick={() => open1688Search(verificationProduct)} className="mt-3 inline-flex items-center gap-1.5 rounded border border-amber-800/60 bg-amber-950/40 px-3 py-1.5 text-[11px] font-black uppercase text-amber-200 hover:bg-amber-900/60">
+                  <Image size={13} /> Mở Image Search 1688
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveVerification} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs font-bold text-zinc-400">Trạng thái xác minh
+                  <select value={verificationForm.status} onChange={(e) => setVerificationForm({ ...verificationForm, status: e.target.value })} className="mt-1 w-full rounded border border-[#333] bg-[#1c1c1c] px-3 py-2 text-xs text-white focus:outline-none">
+                    <option value="PENDING">PENDING — chưa kiểm tra</option>
+                    <option value="REVIEW">REVIEW — cần đối chiếu</option>
+                    <option value="MATCHED">MATCHED — có mẫu tương ứng</option>
+                    <option value="NOT_FOUND">NOT_FOUND — không có mẫu</option>
+                  </select>
+                </label>
+                <label className="text-xs font-bold text-zinc-400">Độ tương đồng (0–100)
+                  <input type="number" min="0" max="100" step="0.01" value={verificationForm.score} onChange={(e) => setVerificationForm({ ...verificationForm, score: e.target.value })} className="mt-1 w-full rounded border border-[#333] bg-[#1c1c1c] px-3 py-2 text-xs text-white focus:outline-none" placeholder="Ví dụ: 88" />
+                </label>
+              </div>
+
+              <label className="block text-xs font-bold text-zinc-400">URL listing tương ứng trên 1688 {verificationForm.status === 'MATCHED' && <span className="text-red-300">*</span>}
+                <input type="url" required={verificationForm.status === 'MATCHED'} value={verificationForm.url} onChange={(e) => setVerificationForm({ ...verificationForm, url: e.target.value })} className="mt-1 w-full rounded border border-[#333] bg-[#1c1c1c] px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none" placeholder="https://detail.1688.com/offer/..." />
+              </label>
+
+              <label className="block text-xs font-bold text-zinc-400">Tên listing trên 1688
+                <input type="text" value={verificationForm.title} onChange={(e) => setVerificationForm({ ...verificationForm, title: e.target.value })} className="mt-1 w-full rounded border border-[#333] bg-[#1c1c1c] px-3 py-2 text-xs text-white focus:outline-none" placeholder="Tên sản phẩm hiển thị trên kết quả tìm kiếm" />
+              </label>
+
+              <label className="block text-xs font-bold text-zinc-400">URL ảnh listing (tuỳ chọn)
+                <input type="url" value={verificationForm.imageUrl} onChange={(e) => setVerificationForm({ ...verificationForm, imageUrl: e.target.value })} className="mt-1 w-full rounded border border-[#333] bg-[#1c1c1c] px-3 py-2 text-xs text-white focus:outline-none" placeholder="https://..." />
+              </label>
+
+              <label className="block text-xs font-bold text-zinc-400">Ghi chú đối chiếu
+                <textarea value={verificationForm.note} onChange={(e) => setVerificationForm({ ...verificationForm, note: e.target.value })} rows={2} className="mt-1 w-full resize-none rounded border border-[#333] bg-[#1c1c1c] px-3 py-2 text-xs text-white focus:outline-none" placeholder="Màu, logo, form mũ, nhà cung cấp..." />
+              </label>
+
+              <div className="flex items-center justify-between gap-3 border-t border-[#252525] pt-4">
+                <div className="flex items-center gap-2 text-[11px] text-amber-200"><CircleAlert size={14} /> Không có URL 1688 thì không thể bán.</div>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => setVerificationProduct(null)} className="btn-secondary text-xs px-4 py-2">Huỷ</button>
+                  <button type="submit" className="btn-flame text-xs px-5 py-2 font-bold"><ShieldCheck size={14} className="mr-1 inline" /> Lưu xác minh</button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}

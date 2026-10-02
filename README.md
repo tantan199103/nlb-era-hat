@@ -16,9 +16,14 @@ Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local` to enable c
 
 The schema is in [supabase/migrations/20261001000000_initial_store.sql](supabase/migrations/20261001000000_initial_store.sql). The catalog seed helper is [supabase/seed_products.mjs](supabase/seed_products.mjs).
 
-The storefront and admin structure is documented in [docs/architecture.md](docs/architecture.md). Apply [supabase/migrations/20261001010000_catalog_navigation_admin.sql](supabase/migrations/20261001010000_catalog_navigation_admin.sql) after the initial schema to enable editable menus, collections, full catalog facets and the protected admin modules.
+The storefront and admin structure is documented in [docs/architecture.md](docs/architecture.md). Apply [supabase/migrations/20261001010000_catalog_navigation_admin.sql](supabase/migrations/20261001010000_catalog_navigation_admin.sql) after the initial schema to enable editable menus, collections, full catalog facets and the protected admin modules. Then apply [supabase/migrations/20261002000000_1688_source_gate.sql](supabase/migrations/20261002000000_1688_source_gate.sql): it hides every product until an admin records a comparable 1688 listing URL and marks it `MATCHED`.
 
 RLS is enabled for all application tables; public catalog reads and guest order creation are allowed, while profiles and wishlists are scoped to the authenticated user.
+
+The 1688 check is intentionally human-in-the-loop. The admin opens the
+product image and 1688 Image Search, completes any 1688 login/CAPTCHA in the
+browser, then stores the chosen result URL. The app never attempts to bypass
+1688 verification or infer a match from a generic search result.
 
 ### Sync hat products from Custom POD
 

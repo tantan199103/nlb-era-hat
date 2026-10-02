@@ -25,6 +25,7 @@ import {
   saveAdminOrder,
   saveStoreSettings,
   updateAdminProductStatus,
+  updateAdminProduct1688Verification,
 } from '../services/adminApi';
 
 export default function AdminShell({ 
@@ -37,6 +38,7 @@ export default function AdminShell({
   onSaveProduct,
   onDeleteProduct,
   onToggleProductStatus,
+  onVerifyProduct1688,
   collections,
   onSaveCollections,
   menus,
@@ -121,6 +123,18 @@ export default function AdminShell({
 
   const toggleProductStatus = async (product, status) => {
     const saved = await updateAdminProductStatus(product.id, status);
+    onSaveProducts?.([
+      ...products.filter((item) => item.id !== product.id),
+      saved,
+    ]);
+    return saved;
+  };
+
+  const verifyProduct1688 = async (product, verification) => {
+    const saved = await updateAdminProduct1688Verification(product.id, {
+      ...verification,
+      product,
+    });
     onSaveProducts?.([
       ...products.filter((item) => item.id !== product.id),
       saved,
@@ -366,6 +380,7 @@ export default function AdminShell({
               onSaveProduct={onSaveProduct || saveProduct}
               onDeleteProduct={onDeleteProduct || deleteProduct}
               onToggleProductStatus={onToggleProductStatus || toggleProductStatus}
+              onVerifyProduct1688={onVerifyProduct1688 || verifyProduct1688}
               currency={currency}
               onOpenPDP={onOpenPDP}
             />

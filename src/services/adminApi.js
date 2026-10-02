@@ -179,6 +179,9 @@ function productPayload(product = {}) {
   const id = Number(product.id) || Date.now();
   const title = String(product.title || 'Untitled hat').trim();
   const metadata = product.metadata && typeof product.metadata === 'object' ? product.metadata : {};
+  const source1688Status = String(
+    product.source1688Status || product.source_1688_status || 'PENDING',
+  ).toUpperCase();
   const images = Array.isArray(product.images) && product.images.length
     ? product.images.filter(Boolean)
     : [product.thumbnail, product.secondaryImage || product.secondary_image].filter(Boolean);
@@ -203,7 +206,21 @@ function productPayload(product = {}) {
       ...(product.productGroup ? { source_product_group: product.productGroup } : {}),
       ...(product.sourceSku ? { source_sku: product.sourceSku } : {}),
     },
-    is_active: product.status !== 'DRAFT' && product.is_active !== false,
+    source_1688_status: source1688Status,
+    source_1688_url: product.source1688Url || product.source_1688_url || null,
+    source_1688_title: product.source1688Title || product.source_1688_title || null,
+    source_1688_image_url: product.source1688ImageUrl || product.source_1688_image_url || null,
+    source_1688_score: product.source1688Score == null || product.source1688Score === ''
+      ? null
+      : Number(product.source1688Score),
+    source_1688_checked_at: product.source1688CheckedAt || product.source_1688_checked_at || null,
+    source_1688_checked_by: product.source1688CheckedBy || product.source_1688_checked_by || null,
+    source_1688_note: product.source1688Note || product.source_1688_note || null,
+    // A publication toggle cannot bypass the source gate. The database
+    // trigger enforces this again for writes made outside this UI.
+    is_active: source1688Status === 'MATCHED'
+      && product.status !== 'DRAFT'
+      && product.is_active !== false,
   };
 }
 
@@ -255,10 +272,69 @@ export async function deleteAdminProduct(productId) {
 }
 
 export async function updateAdminProductStatus(productId, status) {
-  if (!supabase) return { id: productId, status };
+  if (!supabase) {
+    if (status !== 'DRAFT') throw new Error('Listing chưa được xác nhận có mẫu tương ứng trên 1688.');
+    return { id: productId, status, is_active: false };
+  }
+  if (status !== 'DRAFT') {
+    const { data: current, error: currentError } = await supabase
+      .from('products')
+      .select('source_1688_status')
+      .eq('id', Number(productId))
+      .single();
+    if (currentError) throw currentError;
+    if (current?.source_1688_status !== 'MATCHED') {
+      throw new Error('Listing chưa được xác nhận có mẫu tương ứng trên 1688.');
+    }
+  }
   const { data, error } = await supabase
     .from('products')
     .update({ is_active: status !== 'DRAFT' })
+    .eq('id', Number(productId))
+    .select('*, product_variants(*)')
+    .single();
+  if (error) throw error;
+  return mapCatalogRow(data);
+}
+
+export async function updateAdminProduct1688Verification(productId, verification = {}) {
+  const status = String(verification.status || verification.source1688Status || 'PENDING').toUpperCase();
+  const allowed = new Set(['PENDING', 'MATCHED', 'NOT_FOUND', 'REVIEW']);
+  if (!allowed.has(status)) throw new Error('Trạng thái xác minh 1688 không hợp lệ.');
+  const sourceUrl = verification.url || verification.source1688Url || '';
+  if (status === 'MATCHED' && !String(sourceUrl).trim()) {
+    throw new Error('MATCHED phải có URL listing tương ứng trên 1688.');
+  }
+  const checkedAt = verification.checkedAt || new Date().toISOString();
+  const patch = {
+    source_1688_status: status,
+    source_1688_url: sourceUrl || null,
+    source_1688_title: verification.title || verification.source1688Title || null,
+    source_1688_image_url: verification.imageUrl || verification.source1688ImageUrl || null,
+    source_1688_score: verification.score === '' || verification.score == null ? null : Number(verification.score),
+    source_1688_checked_at: checkedAt,
+    source_1688_note: verification.note || verification.source1688Note || null,
+    // MATCHED is the only status that is allowed to be sold. A matched row
+    // is activated here; the normal publication toggle can still hide it.
+    is_active: status === 'MATCHED' && verification.publish !== false,
+  };
+  if (!supabase) {
+    return mapCatalogRow({
+      ...verification.product,
+      id: productId,
+      source_1688_status: status,
+      source_1688_url: patch.source_1688_url,
+      source_1688_title: patch.source_1688_title,
+      source_1688_image_url: patch.source_1688_image_url,
+      source_1688_score: patch.source_1688_score,
+      source_1688_checked_at: checkedAt,
+      source_1688_note: patch.source_1688_note,
+      is_active: patch.is_active,
+    });
+  }
+  const { data, error } = await supabase
+    .from('products')
+    .update(patch)
     .eq('id', Number(productId))
     .select('*, product_variants(*)')
     .single();

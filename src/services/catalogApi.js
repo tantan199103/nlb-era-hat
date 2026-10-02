@@ -29,6 +29,14 @@ export function mapCatalogRow(row = {}) {
     sourceSku: metadata.source_sku || row.sku || '',
     sku: metadata.source_sku || row.sku || '',
     source: metadata.source || '',
+    source1688Status: row.source_1688_status || 'PENDING',
+    source1688Url: row.source_1688_url || '',
+    source1688Title: row.source_1688_title || '',
+    source1688ImageUrl: row.source_1688_image_url || '',
+    source1688Score: row.source_1688_score == null ? null : Number(row.source_1688_score),
+    source1688CheckedAt: row.source_1688_checked_at || null,
+    source1688CheckedBy: row.source_1688_checked_by || null,
+    source1688Note: row.source_1688_note || '',
     status: row.status || (row.is_active === false ? 'DRAFT' : 'PUBLISHED'),
   };
 }
@@ -62,6 +70,7 @@ export async function fetchCatalogPage({
   category = 'hats',
   includeInactive = false,
   status = '',
+  sourceStatus = '',
 } = {}) {
   if (!supabase) return { products: [], count: 0, page, pageSize, source: 'fallback' };
 
@@ -77,7 +86,11 @@ export async function fetchCatalogPage({
     if (status === 'PUBLISHED') request = request.eq('is_active', true);
   } else {
     request = request.eq('is_active', true);
+    // This explicit predicate mirrors the database RLS policy and keeps the
+    // sell gate visible in the client query as well as in the database.
+    request = request.eq('source_1688_status', 'MATCHED');
   }
+  if (sourceStatus) request = request.eq('source_1688_status', sourceStatus);
   if (category) request = request.eq('category', category);
   if (league) request = request.eq('league', league);
   if (team) request = request.ilike('team', `%${safeTerm(team)}%`);
@@ -125,6 +138,7 @@ export async function fetchCatalogSearch(query, { limit = 12, category = 'hats' 
     .from('products')
     .select('*, product_variants(*)')
     .eq('is_active', true)
+    .eq('source_1688_status', 'MATCHED')
     .eq('category', category)
     .or([
       `title.ilike.${pattern}`,

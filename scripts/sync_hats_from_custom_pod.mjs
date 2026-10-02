@@ -141,7 +141,11 @@ function normalizeProduct(product) {
     badge: cleanText(product.badge),
     description: cleanText(product.description || product.subtitle),
     metadata,
-    is_active: product.status === 'PUBLISHED',
+    // The destination database owns publication now. New/changed source
+    // products enter the 1688 verification queue and the database trigger
+    // prevents an unverified row from becoming publicly active. Do not send
+    // is_active here: including it would reset an administrator's MATCHED
+    // decision every time the source catalog is synchronized.
     created_at: product.created_at || undefined,
     updated_at: product.updated_at || undefined,
     _source_id: sourceId,

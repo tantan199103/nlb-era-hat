@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import AnnouncementBar from './components/AnnouncementBar';
 import Navbar from './components/Navbar';
 import HeroBanner from './components/HeroBanner';
@@ -73,11 +73,18 @@ function routePath(view, params = {}, product = null) {
   return '/';
 }
 
+function is1688Matched(product) {
+  return String(product?.source1688Status || product?.source_1688_status || '').toUpperCase() === 'MATCHED';
+}
+
 export default function App() {
   // Navigation / View state ('home' | 'collections' | 'product' | 'access-pass' | 'stores' | 'calendar' | 'track-order' | 'admin')
   const [currentView, setCurrentView] = useState('home'); 
   const [selectedProductForPDP, setSelectedProductForPDP] = useState(products[0]);
   const [catalogProducts, setCatalogProducts] = useState(products);
+  // The admin keeps the full local/remote state, while every storefront
+  // surface receives only rows that passed the 1688 source gate.
+  const publicCatalogProducts = useMemo(() => catalogProducts.filter(is1688Matched), [catalogProducts]);
 
   // Admin Portal & Merchandising State
   const [adminTab, setAdminTab] = useState('overview');
@@ -188,20 +195,10 @@ export default function App() {
   const [cart, setCart] = useState(() => {
     try {
       const saved = localStorage.getItem('lidshd_cart');
-      if (saved) return JSON.parse(saved);
+      if (saved) return JSON.parse(saved).filter(is1688Matched);
     } catch (e) {}
-    // Initial sample item
-    return [
-      {
-        id: products[0]?.id || 1,
-        title: products[0]?.title || 'Boston Red Sox MLB Playing with Fire New Era 59FIFTY',
-        price: products[0]?.price || '$49.99',
-        size: '7 3/8',
-        thumbnail: products[0]?.thumbnail || 'https://www.lidshd.com/cdn/shop/files/23235120_04.png?v=1790339447&width=2048',
-        quantity: 1,
-        team: products[0]?.team || 'Boston Red Sox'
-      }
-    ];
+    // Never pre-fill the cart with an unverified sample listing.
+    return [];
   });
 
   // Modals & Drawers state
@@ -229,13 +226,13 @@ export default function App() {
       setActiveTeamFilter(route.params?.team || null);
       setActiveSearchFilter(route.params?.search || '');
       if (route.view === 'product' && route.handle) {
-        setSelectedProductForPDP((current) => catalogProducts.find((product) => String(product.handle || product.id) === route.handle) || current);
+        setSelectedProductForPDP((current) => publicCatalogProducts.find((product) => String(product.handle || product.id) === route.handle) || current);
       }
     };
     applyRoute();
     window.addEventListener('popstate', applyRoute);
     return () => window.removeEventListener('popstate', applyRoute);
-  }, [catalogProducts]);
+  }, [catalogProducts, publicCatalogProducts]);
 
   // Persist cart to localStorage
   useEffect(() => {
@@ -331,6 +328,7 @@ export default function App() {
   };
 
   const handleOpenPDP = (product) => {
+    if (!is1688Matched(product)) return;
     setSelectedProductForPDP(product);
     setCurrentView('product');
     window.history.pushState({}, '', routePath('product', {}, product));
@@ -376,6 +374,7 @@ export default function App() {
 
   // Cart Handlers
   const handleAddToCart = (product, size) => {
+    if (!is1688Matched(product)) return;
     setCart((prev) => {
       const existingIndex = prev.findIndex(
         (item) => item.id === product.id && item.size === size
@@ -395,7 +394,8 @@ export default function App() {
             size: size,
             thumbnail: product.thumbnail,
             quantity: 1,
-            team: product.team
+            team: product.team,
+            source1688Status: 'MATCHED',
           }
         ];
       }
@@ -426,6 +426,11 @@ export default function App() {
   };
 
   const handleCheckoutSuccess = (items, subtotal) => {
+    if (!items?.length || items.some((item) => !is1688Matched(item))) {
+      setCart((current) => current.filter(is1688Matched));
+      setCartOpen(false);
+      return;
+    }
     setCartOpen(false);
     createOrder({ items, subtotal, currency, user }).then((order) => {
       const generatedNumber = order?.order_number || `LHD-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -561,7 +566,7 @@ export default function App() {
 
             {/* Latest Drops Section with On-Card Size Selector */}
             <LatestDrops 
-              products={catalogProducts}
+              products={publicCatalogProducts}
               onAddToCart={handleAddToCart}
               onQuickView={(p) => setQuickViewProduct(p)}
               onNavigateProduct={handleOpenPDP}
@@ -583,7 +588,7 @@ export default function App() {
 
             {/* Pins & Chains Section */}
             <PinsAccessories 
-              products={catalogProducts}
+              products={publicCatalogProducts}
               onAddToCart={handleAddToCart}
               onQuickView={(p) => setQuickViewProduct(p)}
               onNavigateProduct={handleOpenPDP}
@@ -609,7 +614,7 @@ export default function App() {
 
         {currentView === 'collections' && (
           <CollectionsPage 
-            products={catalogProducts}
+            products={publicCatalogProducts}
             onAddToCart={handleAddToCart}
             onQuickView={(p) => setQuickViewProduct(p)}
             onNavigateProduct={handleOpenPDP}
@@ -626,10 +631,10 @@ export default function App() {
           />
         )}
 
-        {currentView === 'product' && (
+        {currentView === 'product' && is1688Matched(selectedProductForPDP) && (
           <ProductDetailPage 
             product={selectedProductForPDP}
-            allProducts={catalogProducts}
+            allProducts={publicCatalogProducts}
             onAddToCart={handleAddToCart}
             onBackToCatalog={() => setCurrentView('collections')}
             onNavigateProduct={handleOpenPDP}
@@ -638,6 +643,14 @@ export default function App() {
             onToggleWishlist={handleToggleWishlist}
             wishlistIds={wishlist.map(w => w.id)}
           />
+        )}
+
+        {currentView === 'product' && !is1688Matched(selectedProductForPDP) && (
+          <div className="mx-auto max-w-3xl px-6 py-24 text-center">
+            <h1 className="font-display text-3xl font-black uppercase text-white">Listing chưa sẵn sàng</h1>
+            <p className="mt-3 text-sm text-zinc-500">Sản phẩm chỉ được bán sau khi admin xác nhận có mẫu tương ứng trên 1688.</p>
+            <button onClick={() => handleNavigate('collections')} className="btn-flame mt-6 px-5 py-2 text-xs">Quay lại catalog</button>
+          </div>
         )}
 
         {currentView === 'access-pass' && (
@@ -698,7 +711,7 @@ export default function App() {
       <CapCustomizerModal 
         isOpen={customizerOpen}
         onClose={() => setCustomizerOpen(false)}
-        products={catalogProducts}
+        products={publicCatalogProducts}
         onAddBundleToCart={handleAddBundleToCart}
         currency={currency}
       />
@@ -714,7 +727,7 @@ export default function App() {
       <SearchModal 
         isOpen={searchOpen}
         onClose={() => setSearchOpen(false)}
-        products={catalogProducts}
+        products={publicCatalogProducts}
         onSelectProduct={handleOpenPDP}
         onBrowseSearch={(query) => handleNavigate('collections', { search: query })}
         currency={currency}

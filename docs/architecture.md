@@ -58,7 +58,15 @@ Products are in `products`; sizes and inventory are in
 
 - `category = hats`
 - `metadata.source_product_group = Caps` or `Knit Hats`
-- `is_active = true` for the public catalog
+- `source_1688_status = MATCHED` and `is_active = true` for the public catalog
+
+Every product is placed in the 1688 source-check queue (`PENDING`, `REVIEW`,
+`MATCHED` or `NOT_FOUND`). The admin's **Image Search 1688** action opens the
+product image and 1688 image-search page in separate tabs; the operator then
+records the selected 1688 listing URL, title, optional score and notes. A
+`MATCHED` row must have a source URL. Database RLS, a publication trigger,
+catalog queries, cart creation and checkout all enforce this gate, so an
+unverified listing cannot be sold by bypassing the admin UI.
 
 `src/lib/catalogFilters.js` provides one shared taxonomy and search vocabulary
 for the storefront and admin:
@@ -87,7 +95,7 @@ fallback rendering. For a production catalog with all 26k hats, add a
 | Module | Responsibility | Persistence |
 | --- | --- | --- |
 | Overview | sales, stock and membership snapshot | reads current app state |
-| Drop Inventory | search, league/status filtering, pagination, publish toggle, create, duplicate, delete | `products`, `product_variants` |
+| Drop Inventory | search, league/publication/1688-status filtering, pagination, image-search handoff, source verification, publish toggle, create, duplicate, delete | `products`, `product_variants` and 1688 source fields |
 | Curated Drops | collection rules, hero, status and product membership | `store_collections`, `store_collection_products` |
 | Dynamic Menus | nested links, visibility, target and location | `store_menus`, `store_menu_items` |
 | Orders & Fulfillment | status and tracking workflow | `orders` and `order_items` |
@@ -126,5 +134,7 @@ It never deletes destination rows.
 3. Set `profiles.role = 'admin'` for the real admin user after Auth signup.
 4. Verify `/collections`, `/product/:handle`, `/admin`, a search query and one
    checkout order on the Vercel deployment.
-5. Keep the service role key only in the local sync command or a server-side
+5. Verify a representative batch on 1688, set `MATCHED` only when the source
+   listing is genuinely comparable, and leave uncertain results in `REVIEW`.
+6. Keep the service role key only in the local sync command or a server-side
    secret; never put it in Vite client variables.
