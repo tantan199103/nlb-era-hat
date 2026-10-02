@@ -1,55 +1,70 @@
 import React, { useState } from 'react';
-import { X, User, ShieldCheck, Sparkles, Package, MapPin, Ruler, LogOut, Check, ArrowRight } from 'lucide-react';
+import { X, User, Sparkles, Package, MapPin, Ruler, LogOut, Check, ArrowRight } from 'lucide-react';
+import { hasSupabase } from '../lib/supabase';
+import { formatPrice } from '../utils/currency';
 
 export default function AccountModal({ 
   isOpen, 
   onClose, 
   user, 
+  orders = [],
+  ordersLoading = false,
+  ordersError = '',
   onLogin, 
   onLogout,
   userPreferredSize,
-  onUpdatePreferredSize,
-  onOpenAdmin
+  onUpdatePreferredSize
 }) {
   const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'settings' | 'points'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authMessage, setAuthMessage] = useState('');
 
   if (!isOpen) return null;
 
   const fittedSizes = ['6 7/8', '7', '7 1/8', '7 1/4', '7 3/8', '7 1/2', '7 5/8', '7 3/4', '7 7/8', '8'];
 
-  const pastOrders = [
-    {
-      id: 'LHD-789210',
-      date: 'Sept 20, 2026',
-      title: 'Boston Red Sox MLB Playing with Fire New Era 59FIFTY',
-      size: '7 3/8',
-      price: '$49.99',
-      status: 'Delivered',
-      tracking: '1Z9999999999999999'
-    },
-    {
-      id: 'LHD-654120',
-      date: 'Aug 14, 2026',
-      title: 'Wu-Tang Rhinestone Gold Chain & Pin Bundle',
-      size: 'ONE SIZE',
-      price: '$49.98',
-      status: 'Delivered',
-      tracking: '1Z8888888888888888'
-    }
-  ];
+  // Order history is supplied by the authenticated user's RLS-scoped query.
+  // Never render seeded/demo orders here because they look like purchases.
+  const pastOrders = Array.isArray(orders) ? orders : [];
+  const formatOrderDate = (value) => {
+    if (!value) return 'Date pending';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? 'Date pending' : date.toLocaleDateString(undefined, { dateStyle: 'medium' });
+  };
 
-  const handleSignIn = (e) => {
+  const handleSignIn = async (e) => {
     e.preventDefault();
-    if (!email) return;
-    onLogin({
-      name: email.split('@')[0].toUpperCase(),
-      email: email,
-      tier: 'All-Star VIP',
-      points: 750,
-      joinedYear: '2026'
-    });
+    if (busy || !email.trim() || !password) return;
+    setBusy(true);
+    setAuthError('');
+    setAuthMessage('');
+    try {
+      const result = await onLogin({ email: email.trim(), password, signUp: isSignUp });
+      setPassword('');
+      setAuthMessage(result?.message || '');
+      if (isSignUp) setIsSignUp(false);
+    } catch (error) {
+      setAuthError(error.message || 'Unable to authenticate. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setBusy(true);
+    setAuthError('');
+    setAuthMessage('');
+    try {
+      await onLogout();
+    } catch (error) {
+      setAuthError(error.message || 'Unable to sign out. Please try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -76,6 +91,8 @@ export default function AccountModal({
 
         {/* Content */}
         <div className="p-6 overflow-y-auto flex-1 custom-scroll">
+          {authError && <p role="alert" className="mb-4 text-sm text-red-400">{authError}</p>}
+          {authMessage && <p role="status" className="mb-4 text-sm text-gray-300">{authMessage}</p>}
           {user ? (
             <div className="space-y-6">
               
@@ -88,12 +105,13 @@ export default function AccountModal({
                   <div className="text-xs text-gray-400">{user.email}</div>
                   <div className="inline-flex items-center gap-1.5 mt-2 bg-[#2b200b] border border-[#ffaa00]/40 px-2.5 py-0.5 rounded text-[11px] font-bold text-[#ffaa00]">
                     <Sparkles size={12} />
-                    <span>{user.tier} Member • {user.points} Points</span>
+                    <span>{user.offline ? 'Offline demo account' : 'Authenticated account'}</span>
                   </div>
                 </div>
 
                 <button 
-                  onClick={onLogout}
+                  onClick={handleSignOut}
+                  disabled={busy}
                   className="btn-secondary text-[11px] py-1.5 px-3 text-gray-400 hover:text-[#ff3b30] flex items-center gap-1"
                 >
                   <LogOut size={12} />
@@ -124,18 +142,21 @@ export default function AccountModal({
               {/* Tab 1: Orders */}
               {activeTab === 'orders' && (
                 <div className="space-y-3">
-                  {pastOrders.map((ord) => (
+                  {ordersLoading && <p className="text-xs text-gray-400">Loading your order history…</p>}
+                  {!ordersLoading && ordersError && <p role="alert" className="text-xs leading-5 text-amber-200">{ordersError}</p>}
+                  {!ordersLoading && !ordersError && !pastOrders.length && <p className="text-xs text-gray-400">No orders are linked to this account yet.</p>}
+                  {!ordersLoading && pastOrders.map((ord) => (
                     <div key={ord.id} className="bg-[#181818] border border-[#252525] p-3.5 rounded-lg space-y-1.5">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="font-display font-black text-white">{ord.id}</span>
+                        <span className="font-display font-black text-white">{ord.orderNumber || 'Order reference pending'}</span>
                         <span className="bg-[#1f2d22] text-[#3ed660] text-[10px] font-bold px-2 py-0.5 rounded">
-                          {ord.status}
+                          {String(ord.status || 'pending').toUpperCase()}
                         </span>
                       </div>
-                      <div className="text-xs font-bold text-gray-200">{ord.title}</div>
+                      <div className="text-xs font-bold text-gray-200">{ord.items?.length || 0} item{ord.items?.length === 1 ? '' : 's'} • {formatOrderDate(ord.date)}</div>
                       <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1">
-                        <span>Size: {ord.size} • {ord.date}</span>
-                        <span className="font-bold text-white">{ord.price}</span>
+                        <span>{ord.items?.[0]?.size ? `Size: ${ord.items[0].size}` : 'Drop order'}</span>
+                        <span className="font-bold text-white">{formatPrice(ord.subtotal || 0, ord.currency || 'USD')}</span>
                       </div>
                     </div>
                   ))}
@@ -179,30 +200,15 @@ export default function AccountModal({
                 </div>
               )}
 
-              {/* Staff shortcut */}
-              <div className="pt-3 border-t border-[#262626]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenAdmin?.();
-                  }}
-                  className="w-full py-2.5 px-3 bg-[#1e1e1e] hover:bg-[#ff3b30] border border-[#2e2e2e] text-zinc-300 hover:text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <ShieldCheck size={15} className="text-[#ff3b30]" />
-                  <span>OPEN STORE ADMIN CONTROL ROOM</span>
-                </button>
-              </div>
-
             </div>
           ) : (
             <div className="space-y-6">
               <div>
                 <h3 className="font-display text-2xl font-black text-white uppercase tracking-tight mb-1">
-                  SIGN IN TO YOUR COLLECTOR VAULT
+                  {isSignUp ? 'CREATE YOUR COLLECTOR ACCOUNT' : 'SIGN IN TO YOUR COLLECTOR VAULT'}
                 </h3>
                 <p className="text-xs text-gray-400">
-                  Track drop shipments, redeem Access Pass points, and secure early access links.
+                  {hasSupabase ? 'Sign in securely with your email and password.' : 'Account access is unavailable until Supabase Auth is configured.'}
                 </p>
               </div>
 
@@ -213,6 +219,8 @@ export default function AccountModal({
                   </label>
                   <input 
                     type="email" 
+                    autoComplete="email"
+                    disabled={busy}
                     required
                     placeholder="name@example.com"
                     value={email}
@@ -227,6 +235,9 @@ export default function AccountModal({
                   </label>
                   <input 
                     type="password" 
+                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                    minLength={isSignUp ? 6 : undefined}
+                    disabled={busy}
                     required
                     placeholder="••••••••"
                     value={password}
@@ -237,40 +248,27 @@ export default function AccountModal({
 
                 <button 
                   type="submit"
+                  disabled={busy}
                   className="w-full btn-flame text-xs py-3 mt-2"
                 >
-                  SIGN IN TO LIDS HD
+                  {busy ? 'PLEASE WAIT…' : isSignUp ? 'CREATE ACCOUNT' : 'SIGN IN TO LIDS HD'}
                 </button>
               </form>
 
               <div className="text-center text-xs text-gray-500 pt-2 border-t border-[#222222]">
-                New to Lids Hat Drop? <br />
+                {isSignUp ? 'Already have an account?' : 'New to Lids Hat Drop?'} <br />
                 <button 
+                  type="button"
+                  disabled={busy}
                   onClick={() => {
-                    onLogin({
-                      name: 'VIP COLLECTOR',
-                      email: 'collector@lidshd.com',
-                      tier: 'All-Star VIP',
-                      points: 500,
-                      joinedYear: '2026'
-                    });
+                    setIsSignUp((value) => !value);
+                    setAuthError('');
+                    setAuthMessage('');
                   }}
                   className="text-white hover:underline font-bold mt-1 inline-block"
                 >
-                  Join Access Pass for Free with 1-Click &rarr;
+                  {isSignUp ? 'Sign in instead' : 'Create an account'} &rarr;
                 </button>
-                <div className="pt-2">
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenAdmin?.();
-                    }}
-                    className="text-xs text-zinc-500 hover:text-[#ff3b30] font-bold"
-                  >
-                    ⚡ Store Staff: Access Admin Control Room
-                  </button>
-                </div>
               </div>
             </div>
           )}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Trash2, Plus, Minus, ShoppingBag, Truck, ShieldCheck, ArrowRight, Sparkles } from 'lucide-react';
 import { formatPrice } from '../utils/currency';
 
@@ -9,11 +9,18 @@ export default function CartDrawer({
   onUpdateQuantity, 
   onRemoveItem,
   onCheckoutSuccess,
+  customerEmail = '',
   currency = 'USD'
 }) {
   const [promoCode, setPromoCode] = useState('');
   const [discountApplied, setDiscountApplied] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [checkoutEmail, setCheckoutEmail] = useState(customerEmail);
+  const [checkoutError, setCheckoutError] = useState('');
+
+  useEffect(() => {
+    if (customerEmail) setCheckoutEmail(customerEmail);
+  }, [customerEmail]);
 
   if (!isOpen) return null;
 
@@ -41,10 +48,16 @@ export default function CartDrawer({
   };
 
   const handleCheckout = () => {
+    const normalizedEmail = checkoutEmail.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      setCheckoutError('Enter the email address you want to use for the order confirmation.');
+      return;
+    }
+    setCheckoutError('');
     setIsCheckingOut(true);
     setTimeout(() => {
       setIsCheckingOut(false);
-      if (onCheckoutSuccess) onCheckoutSuccess(cartItems, subtotal);
+      if (onCheckoutSuccess) onCheckoutSuccess(cartItems, subtotal, normalizedEmail);
     }, 1200);
   };
 
@@ -228,6 +241,24 @@ export default function CartDrawer({
                 <span>-{formatPrice(discountAmount, currency)}</span>
               </div>
             )}
+
+            <div>
+              <label htmlFor="checkout-email" className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-gray-400">Order confirmation email</label>
+              <input
+                id="checkout-email"
+                type="email"
+                autoComplete="email"
+                required
+                value={checkoutEmail}
+                onChange={(event) => {
+                  setCheckoutEmail(event.target.value);
+                  setCheckoutError('');
+                }}
+                placeholder="you@example.com"
+                className="w-full rounded border border-[#333333] bg-[#1f1f1f] px-3 py-2 text-xs text-white placeholder:text-gray-500 focus:border-white focus:outline-none"
+              />
+              {checkoutError && <p role="alert" className="mt-1.5 text-[11px] leading-4 text-amber-200">{checkoutError}</p>}
+            </div>
 
             {/* Subtotal */}
             <div className="flex items-baseline justify-between pt-1">

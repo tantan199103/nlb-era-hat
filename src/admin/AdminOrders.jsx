@@ -426,7 +426,7 @@ export default function AdminOrders({ orders, onSaveOrders, currency = 'USD' }) 
                     type="text"
                     value={form.trackingNumber}
                     onChange={e => setForm({ ...form, trackingNumber: e.target.value })}
-                    placeholder="e.g. 1Z9999999999999999"
+                    placeholder="Carrier tracking number"
                     className="admin-form-input font-mono text-xs"
                   />
                 </div>

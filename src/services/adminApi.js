@@ -95,7 +95,9 @@ export async function getAdminSession() {
   const user = sessionData?.session?.user || null;
   if (!user) return { authenticated: false, isAdmin: false, user: null };
   const { data: profile } = await supabase.from('profiles').select('role,display_name').eq('id', user.id).maybeSingle();
-  const isAdmin = profile?.role === 'admin' || user.user_metadata?.role === 'admin';
+  // Admin access is controlled by the RLS-backed profile role. Auth metadata
+  // is user-editable and must never be treated as an authorization source.
+  const isAdmin = profile?.role === 'admin';
   return { authenticated: true, isAdmin, user, profile: profile || null };
 }
 
@@ -457,4 +459,31 @@ export async function fetchAdminMembers(fallback = []) {
     ordersCount: 0,
     earlyAccess: profile.tier !== 'Rookie Collector',
   }));
+}
+
+/**
+ * Fetch small aggregate counts for the admin overview without downloading the
+ * entire 26k-row catalog. This query is protected by the existing admin RLS
+ * policy and returns null when the dashboard is running in offline mode.
+ */
+export async function fetchAdminCatalogStats(fallback = null) {
+  if (!supabase) return fallback;
+  const count = async (queryBuilder) => {
+    const { count: value, error } = await queryBuilder;
+    if (error) throw error;
+    return Number(value || 0);
+  };
+  try {
+    const [matchedActive, matched, pending, review, notFound] = await Promise.all([
+      count(supabase.from('products').select('id', { count: 'exact', head: true }).eq('source_1688_status', 'MATCHED').eq('is_active', true)),
+      count(supabase.from('products').select('id', { count: 'exact', head: true }).eq('source_1688_status', 'MATCHED')),
+      count(supabase.from('products').select('id', { count: 'exact', head: true }).eq('source_1688_status', 'PENDING')),
+      count(supabase.from('products').select('id', { count: 'exact', head: true }).eq('source_1688_status', 'REVIEW')),
+      count(supabase.from('products').select('id', { count: 'exact', head: true }).eq('source_1688_status', 'NOT_FOUND')),
+    ]);
+    return { matchedActive, matched, pending, review, notFound, queue: pending + review + notFound };
+  } catch (error) {
+    console.warn('Supabase catalog stats failed:', error.message);
+    return fallback;
+  }
 }

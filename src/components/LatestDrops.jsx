@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import ProductCard from './ProductCard';
 import { Flame, Sparkles, Filter, ChevronRight } from 'lucide-react';
+import CatalogAvailabilityNotice from './CatalogAvailabilityNotice';
 
 export default function LatestDrops({ 
   products, 
@@ -12,7 +13,10 @@ export default function LatestDrops({
   onResetFilters,
   wishlistIds = [],
   onToggleWishlist,
-  currency = 'USD'
+  currency = 'USD',
+  catalogStatus = null,
+  onBrowseCalendar,
+  onNotify,
 }) {
   const [selectedTab, setSelectedTab] = useState('all');
 
@@ -52,6 +56,14 @@ export default function LatestDrops({
 
     return result;
   }, [products, selectedTab, activeLeagueFilter, activeTeamFilter]);
+
+  const hasVerifiedCatalog = catalogStatus
+    ? Number(catalogStatus.matchedCount) > 0
+    : products.length > 0;
+  const hasActiveCollectionFilter = Boolean(activeTeamFilter || activeLeagueFilter || selectedTab !== 'all');
+  const emptyReason = catalogStatus?.error
+    ? 'error'
+    : hasVerifiedCatalog && hasActiveCollectionFilter ? 'filtered' : 'verification';
 
   return (
     <section id="latest-drops" className="py-14 sm:py-20 px-4 lg:px-8 max-w-[1440px] mx-auto border-b border-[#222222]">
@@ -121,29 +133,39 @@ export default function LatestDrops({
           ))}
         </div>
       ) : (
-        <div className="text-center py-16 bg-[#141414] rounded-lg border border-[#262626]">
-          <p className="text-gray-400 font-semibold mb-3">No drop caps found matching your filter.</p>
-          <button 
-            onClick={onResetFilters}
-            className="btn-secondary text-xs"
-          >
-            Reset Filters
-          </button>
-        </div>
+        <CatalogAvailabilityNotice
+          reason={emptyReason}
+          pendingCount={catalogStatus?.pendingCount}
+          onBrowseCalendar={onBrowseCalendar}
+          onNotify={onNotify}
+          onClearFilters={onResetFilters}
+          compact
+        />
       )}
 
       {/* Bottom CTA */}
       <div className="mt-12 text-center">
-        <button 
-          onClick={() => {
-            setSelectedTab('all');
-            if (onResetFilters) onResetFilters();
-          }}
-          className="btn-secondary px-8 py-3.5 text-sm inline-flex items-center gap-2 group cursor-pointer"
-        >
-          <span>VIEW ALL 30+ NEW ERA CAPS</span>
-          <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
-        </button>
+        {hasVerifiedCatalog ? (
+          <button
+            onClick={() => {
+              setSelectedTab('all');
+              if (onResetFilters) onResetFilters();
+            }}
+            className="btn-secondary px-8 py-3.5 text-sm inline-flex items-center gap-2 group cursor-pointer"
+          >
+            <span>VIEW ALL VERIFIED CAPS</span>
+            <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
+          </button>
+        ) : onBrowseCalendar ? (
+          <button
+            type="button"
+            onClick={onBrowseCalendar}
+            className="btn-secondary px-8 py-3.5 text-sm inline-flex items-center gap-2 group cursor-pointer"
+          >
+            <span>VIEW DROP CALENDAR</span>
+            <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
+          </button>
+        ) : null}
       </div>
 
     </section>

@@ -16,7 +16,7 @@ import WishlistDrawer from './components/WishlistDrawer';
 import AccountModal from './components/AccountModal';
 import CapCustomizerModal from './components/CapCustomizerModal';
 import Footer from './components/Footer';
-import { createOrder, fetchProducts, saveProfile, subscribeToDrop } from './services/storeApi';
+import { createOrder, fetchMyOrders, fetchProducts, saveProfile, subscribeToDrop } from './services/storeApi';
 import { fetchStorefrontCollections, fetchStorefrontMenus } from './services/adminApi';
 
 // Full Pages
@@ -25,9 +25,11 @@ import ProductDetailPage from './pages/ProductDetailPage';
 import AccessPassPage from './pages/AccessPassPage';
 import StoresPage from './pages/StoresPage';
 import TrackOrderPage from './pages/TrackOrderPage';
+import PolicyPage from './pages/PolicyPage';
 import AdminShell from './admin/AdminShell';
 
 import { products } from './data/storeData';
+import { supabase } from './lib/supabase';
 import { 
   defaultMenus, 
   defaultCollections, 
@@ -39,6 +41,8 @@ import {
 function readStorefrontRoute() {
   const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
   const params = new URLSearchParams(window.location.search);
+  const policySlug = pathname.slice(1);
+  if (['about', 'privacy', 'terms', 'sustainability', 'accessibility'].includes(policySlug)) return { view: 'policy', params: { slug: policySlug } };
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return { view: 'admin', params: {} };
   if (pathname === '/collections' || pathname === '/shop' || pathname.startsWith('/category/')) {
     const routeParams = Object.fromEntries(params.entries());
@@ -70,6 +74,7 @@ function routePath(view, params = {}, product = null) {
   if (view === 'stores') return '/stores';
   if (view === 'track-order') return '/track-order';
   if (view === 'calendar') return '/calendar';
+  if (view === 'policy') return `/${params.slug || 'about'}`;
   return '/';
 }
 
@@ -77,14 +82,37 @@ function is1688Matched(product) {
   return String(product?.source1688Status || product?.source_1688_status || '').toUpperCase() === 'MATCHED';
 }
 
+function accountFromSession(authUser) {
+  if (!authUser) return null;
+  return {
+    id: authUser.id,
+    email: authUser.email,
+    name: authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'Collector',
+    user_metadata: authUser.user_metadata,
+  };
+}
+
 export default function App() {
   // Navigation / View state ('home' | 'collections' | 'product' | 'access-pass' | 'stores' | 'calendar' | 'track-order' | 'admin')
   const [currentView, setCurrentView] = useState('home'); 
   const [selectedProductForPDP, setSelectedProductForPDP] = useState(products[0]);
-  const [catalogProducts, setCatalogProducts] = useState(products);
+  // Connected storefronts start empty while the source-approved page loads;
+  // otherwise the local seed briefly flashes as if it were sellable data.
+  const [catalogProducts, setCatalogProducts] = useState(() => supabase ? [] : products);
+  const [catalogLoading, setCatalogLoading] = useState(() => Boolean(supabase));
+  const [catalogLoadError, setCatalogLoadError] = useState(false);
   // The admin keeps the full local/remote state, while every storefront
   // surface receives only rows that passed the 1688 source gate.
   const publicCatalogProducts = useMemo(() => catalogProducts.filter(is1688Matched), [catalogProducts]);
+  const catalogStatus = useMemo(() => ({
+    matchedCount: publicCatalogProducts.length,
+    // When the public API is connected it intentionally cannot expose the
+    // private review queue. The count is still useful for the local/offline
+    // seed and for an admin preview, while the public copy remains generic.
+    pendingCount: catalogProducts.filter((product) => !is1688Matched(product)).length,
+    loading: catalogLoading,
+    error: catalogLoadError,
+  }), [catalogProducts, publicCatalogProducts, catalogLoading, catalogLoadError]);
 
   // Admin Portal & Merchandising State
   const [adminTab, setAdminTab] = useState('overview');
@@ -110,6 +138,9 @@ export default function App() {
   });
 
   const [orders, setOrders] = useState(() => {
+    // Connected mode reads orders from Supabase after admin auth. Do not
+    // surface stale local preview orders while that request is pending.
+    if (supabase) return [];
     try {
       const saved = localStorage.getItem('lidshd_orders');
       if (saved) return JSON.parse(saved);
@@ -155,11 +186,24 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => {
+    if (!supabase) return undefined;
     let active = true;
+    setCatalogLoading(true);
+    setCatalogLoadError(false);
     fetchProducts().then((remoteProducts) => {
-      if (!active || !remoteProducts?.length) return;
+      if (!active) return;
+      if (!Array.isArray(remoteProducts)) {
+        setCatalogLoadError(true);
+        return;
+      }
+      // An empty result is meaningful: Supabase is reachable, but there are
+      // currently no MATCHED listings. Do not keep stale seed rows visible.
       setCatalogProducts(remoteProducts);
-      setSelectedProductForPDP((current) => remoteProducts.find((item) => item.id === current?.id) || remoteProducts[0]);
+      setSelectedProductForPDP((current) => remoteProducts.find((item) => item.id === current?.id) || remoteProducts[0] || null);
+    }).catch(() => {
+      if (active) setCatalogLoadError(true);
+    }).finally(() => {
+      if (active) setCatalogLoading(false);
     });
     return () => { active = false; };
   }, []);
@@ -171,12 +215,17 @@ export default function App() {
 
   // User & Preferred Size state
   const [user, setUser] = useState(() => {
+    // A browser cache is never an authenticated identity in connected mode.
+    if (supabase) return null;
     try {
       const saved = localStorage.getItem('lidshd_user');
       if (saved) return JSON.parse(saved);
     } catch (e) {}
     return null;
   });
+  const [accountOrders, setAccountOrders] = useState([]);
+  const [accountOrdersLoading, setAccountOrdersLoading] = useState(false);
+  const [accountOrdersError, setAccountOrdersError] = useState('');
 
   const [userPreferredSize, setUserPreferredSize] = useState(() => {
     return localStorage.getItem('lidshd_pref_size') || '7 3/8';
@@ -210,6 +259,7 @@ export default function App() {
   const [quickViewProduct, setQuickViewProduct] = useState(null);
   const [notifyDropTitle, setNotifyDropTitle] = useState(null);
   const [checkoutOrder, setCheckoutOrder] = useState(null);
+  const [checkoutError, setCheckoutError] = useState('');
 
   // Filters for collections/drops
   const [activeLeagueFilter, setActiveLeagueFilter] = useState(null);
@@ -251,13 +301,55 @@ export default function App() {
   // Persist user to localStorage
   useEffect(() => {
     try {
-      if (user) {
+      if (user && !supabase) {
         localStorage.setItem('lidshd_user', JSON.stringify(user));
       } else {
         localStorage.removeItem('lidshd_user');
       }
     } catch (e) {}
   }, [user]);
+
+  useEffect(() => {
+    if (!supabase) return undefined;
+    let active = true;
+    let authEventReceived = false;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      authEventReceived = true;
+      if (active) setUser(accountFromSession(session?.user));
+    });
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (active && !authEventReceived) setUser(error ? null : accountFromSession(data.session?.user));
+    }).catch(() => {
+      if (active && !authEventReceived) setUser(null);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supabase || !user?.id) {
+      setAccountOrders([]);
+      setAccountOrdersLoading(false);
+      setAccountOrdersError('');
+      return undefined;
+    }
+    let active = true;
+    setAccountOrdersLoading(true);
+    setAccountOrdersError('');
+    fetchMyOrders(user.id).then((rows) => {
+      if (active) setAccountOrders(rows);
+    }).catch((error) => {
+      if (active) {
+        setAccountOrders([]);
+        setAccountOrdersError(error?.message || 'Unable to load order history right now.');
+      }
+    }).finally(() => {
+      if (active) setAccountOrdersLoading(false);
+    });
+    return () => { active = false; };
+  }, [user?.id]);
 
   // Persist preferred size & currency
   useEffect(() => {
@@ -359,12 +451,28 @@ export default function App() {
   };
 
   // User Auth Handlers
-  const handleLogin = (userData) => {
-    setUser(userData);
-    saveProfile(userData, userPreferredSize);
+  const handleLogin = async ({ email, password, signUp = false }) => {
+    if (!supabase) {
+      throw new Error('Account sign-in is unavailable because Supabase is not configured. Please configure authentication first.');
+    }
+    const { data, error } = signUp
+      ? await supabase.auth.signUp({ email, password })
+      : await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    if (!data.session) {
+      return { message: 'Check your email to confirm your account, then sign in.' };
+    }
+    const authenticatedUser = accountFromSession(data.session.user);
+    setUser(authenticatedUser);
+    await saveProfile(authenticatedUser, userPreferredSize);
+    return {};
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (supabase) {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+    }
     setUser(null);
   };
 
@@ -375,6 +483,7 @@ export default function App() {
   // Cart Handlers
   const handleAddToCart = (product, size) => {
     if (!is1688Matched(product)) return;
+    const selectedVariant = product.sizes?.find((variant) => variant.size === size);
     setCart((prev) => {
       const existingIndex = prev.findIndex(
         (item) => item.id === product.id && item.size === size
@@ -395,6 +504,7 @@ export default function App() {
             thumbnail: product.thumbnail,
             quantity: 1,
             team: product.team,
+            variantId: selectedVariant?.id || null,
             source1688Status: 'MATCHED',
           }
         ];
@@ -425,50 +535,28 @@ export default function App() {
     );
   };
 
-  const handleCheckoutSuccess = (items, subtotal) => {
+  const handleCheckoutSuccess = async (items, subtotal, customerEmail) => {
     if (!items?.length || items.some((item) => !is1688Matched(item))) {
       setCart((current) => current.filter(is1688Matched));
       setCartOpen(false);
       return;
     }
+    setCheckoutError('');
     setCartOpen(false);
-    createOrder({ items, subtotal, currency, user }).then((order) => {
-      const generatedNumber = order?.order_number || `LHD-${Math.floor(100000 + Math.random() * 900000)}`;
-      setCheckoutOrder({ items, subtotal, orderNumber: generatedNumber });
-
-      // Automatically push into live drop orders state for Admin
-      const newAdminOrder = {
-        id: `ord-${Date.now()}`,
-        orderNumber: generatedNumber,
-        date: new Date().toISOString(),
-        customerName: user?.name || 'GUEST COLLECTOR',
-        customerEmail: user?.email || 'guest@lidshd.com',
-        shippingAddress: {
-          city: 'Brooklyn, NY',
-          country: 'United States',
-          street: '1540 Broadway'
-        },
-        paymentStatus: 'PAID',
-        fulfillmentStatus: 'UNFULFILLED',
-        carrier: 'UPS Ground Tracked',
-        trackingNumber: '',
-        trackingUrl: '',
-        grandTotal: subtotal,
-        currency: currency,
-        items: items.map(item => ({
-          id: item.id,
-          title: item.title,
-          size: item.size,
-          sku: `LHD-5950-${String(item.id).padStart(3, '0')}`,
-          price: typeof item.price === 'string' ? parseFloat(item.price.replace(/[^0-9.]/g, '')) : (item.price || 49.99),
-          quantity: item.quantity,
-          thumbnail: item.thumbnail
-        }))
-      };
-
-      setOrders(prev => [newAdminOrder, ...prev]);
-    });
-    setCart([]);
+    try {
+      const order = await createOrder({ items, subtotal, currency, user, customerEmail });
+      if (!order?.order_number) {
+        throw new Error('The order reference was not returned by the store.');
+      }
+      // The confirmation and admin queue are sourced from the persisted order.
+      // Do not manufacture a local order number or a paid order when persistence fails.
+      setCheckoutOrder({ items, subtotal, orderNumber: order.order_number });
+      setCart([]);
+    } catch (error) {
+      console.warn('Checkout could not be completed:', error?.message || error);
+      setCheckoutError('We could not place your order right now. Your cart is still saved — please try again.');
+      setCartOpen(true);
+    }
   };
 
   const handleDropNotification = (dropTitle, email) => {
@@ -484,7 +572,7 @@ export default function App() {
 
   const scrollToDrops = () => {
     if (currentView !== 'home') {
-      setCurrentView('home');
+      handleNavigate('home');
       setTimeout(() => {
         const el = document.getElementById('latest-drops');
         if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -542,14 +630,10 @@ export default function App() {
         onOpenSearch={() => setSearchOpen(true)}
         onNavigate={handleNavigate}
         onSelectLeague={(league) => {
-          setActiveLeagueFilter(league);
-          setActiveTeamFilter(null);
-          setCurrentView('collections');
+          handleNavigate('collections', { league });
         }}
         onSelectTeam={(team) => {
-          setActiveTeamFilter(team);
-          setActiveLeagueFilter(null);
-          setCurrentView('collections');
+          handleNavigate('collections', { team });
         }}
       />
 
@@ -567,6 +651,7 @@ export default function App() {
             {/* Latest Drops Section with On-Card Size Selector */}
             <LatestDrops 
               products={publicCatalogProducts}
+              catalogStatus={catalogStatus}
               onAddToCart={handleAddToCart}
               onQuickView={(p) => setQuickViewProduct(p)}
               onNavigateProduct={handleOpenPDP}
@@ -576,13 +661,14 @@ export default function App() {
               wishlistIds={wishlist.map(w => w.id)}
               onToggleWishlist={handleToggleWishlist}
               currency={currency}
+              onBrowseCalendar={() => handleNavigate('calendar')}
+              onNotify={() => setNotifyDropTitle('Verified hat drops')}
             />
 
             {/* Featured Curated Collections (Shop By League) */}
             <ShopByLeague 
               onSelectCollection={(title) => {
-                setActiveTeamFilter(title);
-                setCurrentView('collections');
+                handleNavigate('collections', { team: title });
               }}
             />
 
@@ -600,8 +686,7 @@ export default function App() {
             {/* Chicago Sole Banner */}
             <ChicagoSoleBanner 
               onExplore={() => {
-                setActiveTeamFilter('Chicago');
-                setCurrentView('collections');
+                handleNavigate('collections', { team: 'Chicago' });
               }}
             />
 
@@ -615,6 +700,7 @@ export default function App() {
         {currentView === 'collections' && (
           <CollectionsPage 
             products={publicCatalogProducts}
+            catalogStatus={catalogStatus}
             onAddToCart={handleAddToCart}
             onQuickView={(p) => setQuickViewProduct(p)}
             onNavigateProduct={handleOpenPDP}
@@ -628,6 +714,8 @@ export default function App() {
             wishlistIds={wishlist.map(w => w.id)}
             onToggleWishlist={handleToggleWishlist}
             currency={currency}
+            onBrowseCalendar={() => handleNavigate('calendar')}
+            onNotify={() => setNotifyDropTitle('Verified hat drops')}
           />
         )}
 
@@ -636,7 +724,7 @@ export default function App() {
             product={selectedProductForPDP}
             allProducts={publicCatalogProducts}
             onAddToCart={handleAddToCart}
-            onBackToCatalog={() => setCurrentView('collections')}
+            onBackToCatalog={() => handleNavigate('collections')}
             onNavigateProduct={handleOpenPDP}
             currency={currency}
             isWishlisted={wishlist.some(w => w.id === selectedProductForPDP?.id)}
@@ -672,6 +760,10 @@ export default function App() {
             <UpcomingDrops onNotifyMe={(title) => setNotifyDropTitle(title)} />
           </div>
         )}
+
+        {currentView === 'policy' && (
+          <PolicyPage slug={activeCatalogParams.slug || 'about'} onBack={() => handleNavigate('home')} />
+        )}
       </main>
 
       {/* 4. Global Footer */}
@@ -685,8 +777,16 @@ export default function App() {
         onUpdateQuantity={handleUpdateQuantity}
         onRemoveItem={handleRemoveItem}
         onCheckoutSuccess={handleCheckoutSuccess}
+        customerEmail={user?.email || ''}
         currency={currency}
       />
+
+      {checkoutError && (
+        <div role="alert" className="fixed bottom-5 left-1/2 z-[60] flex w-[min(92vw,460px)] -translate-x-1/2 items-start gap-3 rounded-lg border border-amber-800/70 bg-[#241a0f] px-4 py-3 text-xs leading-5 text-amber-100 shadow-2xl">
+          <span className="flex-1">{checkoutError}</span>
+          <button type="button" onClick={() => setCheckoutError('')} className="shrink-0 font-bold uppercase tracking-wider text-amber-300 hover:text-white" aria-label="Dismiss checkout error">Dismiss</button>
+        </div>
+      )}
 
       <WishlistDrawer 
         isOpen={wishlistOpen}
@@ -701,11 +801,13 @@ export default function App() {
         isOpen={accountModalOpen}
         onClose={() => setAccountModalOpen(false)}
         user={user}
+        orders={accountOrders}
+        ordersLoading={accountOrdersLoading}
+        ordersError={accountOrdersError}
         onLogin={handleLogin}
         onLogout={handleLogout}
         userPreferredSize={userPreferredSize}
         onUpdatePreferredSize={handleUpdatePreferredSize}
-        onOpenAdmin={() => setCurrentView('admin')}
       />
 
       <CapCustomizerModal 

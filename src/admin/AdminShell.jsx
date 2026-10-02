@@ -16,6 +16,7 @@ import AdminAccess from './AdminAccess';
 import {
   deleteAdminProduct,
   fetchAdminMembers,
+  fetchAdminCatalogStats,
   fetchAdminOrders,
   fetchStoreSettings,
   getAdminSession,
@@ -57,6 +58,7 @@ export default function AdminShell({
   const [adminNotice, setAdminNotice] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isNewProductModalOpen, setIsNewProductModalOpen] = useState(false);
+  const [catalogStats, setCatalogStats] = useState(null);
 
   // Unfulfilled orders count for badge
   const unfulfilledOrdersCount = orders.filter(o => o.fulfillmentStatus === 'UNFULFILLED').length;
@@ -78,11 +80,13 @@ export default function AdminShell({
       fetchAdminOrders(orders),
       fetchAdminMembers(members),
       fetchStoreSettings(settings),
-    ]).then(([remoteOrders, remoteMembers, remoteSettings]) => {
+      fetchAdminCatalogStats(null),
+    ]).then(([remoteOrders, remoteMembers, remoteSettings, remoteCatalogStats]) => {
       if (!active) return;
       onSaveOrders?.(remoteOrders);
       onSaveMembers?.(remoteMembers);
       onSaveSettings?.(remoteSettings);
+      setCatalogStats(remoteCatalogStats);
     });
     return () => { active = false; };
   }, [adminSession]);
@@ -360,11 +364,12 @@ export default function AdminShell({
         <main className="p-6 md:p-8 flex-1 overflow-y-auto">
           {adminNotice && <div className="mb-4 rounded border border-emerald-800/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-300">{adminNotice}</div>}
           {currentTab === 'overview' && (
-            <AdminOverview 
+            <AdminOverview
               products={products}
               orders={orders}
               members={members}
               collections={collections}
+              catalogStats={catalogStats}
               currency={currency}
               onNavigateTab={onTabChange}
               onOpenNewProductModal={() => {

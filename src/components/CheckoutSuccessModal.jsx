@@ -16,7 +16,10 @@ export default function CheckoutSuccessModal({ isOpen, onClose, orderDetails }) 
 
   if (!isOpen || !orderDetails) return null;
 
-  const orderNumber = orderDetails.orderNumber || ('LHD-' + Math.floor(100000 + Math.random() * 900000));
+  // The order reference must come from the persisted order returned by Supabase.
+  // Never manufacture a number in the confirmation UI: a fabricated reference
+  // cannot be used on the tracking page and makes failed checkouts look paid.
+  const orderNumber = String(orderDetails.orderNumber || '').trim();
   const pointsEarned = Math.floor(orderDetails.subtotal * 10);
 
   return (
@@ -45,7 +48,9 @@ export default function CheckoutSuccessModal({ isOpen, onClose, orderDetails }) 
             THANK YOU FOR YOUR ORDER!
           </h2>
           <p className="text-xs text-gray-400 mt-1">
-            Order #{orderNumber} • A confirmation has been sent to your email.
+            {orderNumber
+              ? <>Order #{orderNumber} • A confirmation has been sent to your email.</>
+              : 'Your order was received. The order reference will appear once it is confirmed.'}
           </p>
         </div>
 

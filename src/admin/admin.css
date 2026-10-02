@@ -560,3 +560,87 @@
   box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
   overflow-y: auto;
 }
+
+/* Keyboard focus should remain visible against the dark control-room palette. */
+.admin-nav-item:focus-visible,
+.admin-store-link:focus-visible,
+.admin-mark:focus-visible {
+  outline: 2px solid var(--admin-flame);
+  outline-offset: 2px;
+}
+
+/* The sidebar is fixed only on the desktop layout. On smaller screens the
+   Tailwind `hidden lg:flex` utility hides it until the hamburger opens it;
+   the content must therefore reclaim the full viewport width. */
+@media (max-width: 63.999rem) {
+  .admin-main {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .admin-topbar {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .admin-content {
+    padding: 24px 16px;
+  }
+
+  .admin-menu-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-table {
+    min-width: 760px;
+  }
+
+  .admin-menu-node.depth-1 {
+    margin-left: 16px;
+  }
+
+  .admin-menu-node.depth-2 {
+    margin-left: 32px;
+  }
+}
+
+@media (max-width: 39.999rem) {
+  .admin-topbar {
+    min-height: 56px;
+    height: auto;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .admin-content {
+    padding: 20px 12px;
+  }
+
+  .admin-intro {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .admin-intro h1 {
+    font-size: 32px;
+  }
+
+  .admin-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .admin-kpi-card {
+    padding: 14px;
+  }
+
+  .admin-kpi-value {
+    font-size: 26px;
+  }
+
+  .admin-menu-node {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}

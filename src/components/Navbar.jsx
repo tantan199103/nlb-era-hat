@@ -303,16 +303,6 @@ export default function Navbar({
 
         {/* Right Action Icons */}
         <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* Admin Control Room Quick Switcher */}
-          <button
-            onClick={() => onNavigate ? onNavigate('admin') : null}
-            className="flex items-center gap-1.5 bg-[#181818] hover:bg-[#ff3b30] border border-[#2e2e2e] hover:border-[#ff3b30] px-2.5 py-1.5 rounded-full text-xs text-zinc-300 hover:text-white font-bold transition-all cursor-pointer group shadow-sm"
-            title="Open Lids HD Admin Control Room"
-          >
-            <span className="w-2 h-2 rounded-full bg-[#ff3b30] group-hover:bg-white animate-pulse" />
-            <span className="text-[11px] font-mono tracking-wider">ADMIN</span>
-          </button>
-
           {/* Desktop Search Trigger */}
           <button 
             onClick={onOpenSearch}
@@ -473,12 +463,6 @@ export default function Navbar({
 
             {/* Mobile Footer Links */}
             <div className="p-4 border-t border-[#222222] bg-[#0c0c0c] text-xs text-gray-400 space-y-2">
-              <button 
-                onClick={() => { setMobileMenuOpen(false); if (onNavigate) onNavigate('admin'); }} 
-                className="block text-[#ff3b30] font-black hover:underline text-left bg-transparent border-none cursor-pointer flex items-center gap-1.5"
-              >
-                <span>⚡ ADMIN CONTROL ROOM</span>
-              </button>
               <button onClick={() => { setMobileMenuOpen(false); if (onNavigate) onNavigate('stores'); }} className="block hover:text-white text-left bg-transparent border-none cursor-pointer">Store Locator & Flagship</button>
               <button onClick={() => { setMobileMenuOpen(false); if (onNavigate) onNavigate('access-pass'); }} className="block hover:text-white text-left bg-transparent border-none cursor-pointer">Access Pass Rewards</button>
             </div>

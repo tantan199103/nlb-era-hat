@@ -112,11 +112,11 @@ export default function Footer({ onNavigate }) {
               POLICIES & LEGAL
             </h4>
             <ul className="space-y-2 text-xs">
-              <li><a href="#about" className="hover:text-white transition-colors">About Us</a></li>
-              <li><a href="#privacy" className="hover:text-white transition-colors">Privacy Policy</a></li>
-              <li><a href="#terms" className="hover:text-white transition-colors">Terms of Service</a></li>
-              <li><a href="#sustainability" className="hover:text-white transition-colors">2026 Sustainability</a></li>
-              <li><a href="#accessibility" className="hover:text-white transition-colors">Accessibility Statement</a></li>
+              <li><button onClick={() => onNavigate?.('policy', { slug: 'about' })} className="text-left hover:text-white transition-colors">About Us</button></li>
+              <li><button onClick={() => onNavigate?.('policy', { slug: 'privacy' })} className="text-left hover:text-white transition-colors">Privacy Policy</button></li>
+              <li><button onClick={() => onNavigate?.('policy', { slug: 'terms' })} className="text-left hover:text-white transition-colors">Terms of Service</button></li>
+              <li><button onClick={() => onNavigate?.('policy', { slug: 'sustainability' })} className="text-left hover:text-white transition-colors">2026 Sustainability</button></li>
+              <li><button onClick={() => onNavigate?.('policy', { slug: 'accessibility' })} className="text-left hover:text-white transition-colors">Accessibility Statement</button></li>
             </ul>
           </div>
 
