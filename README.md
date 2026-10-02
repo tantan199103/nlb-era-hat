@@ -25,6 +25,18 @@ product image and 1688 Image Search, completes any 1688 login/CAPTCHA in the
 browser, then stores the chosen result URL. The app never attempts to bypass
 1688 verification or infer a match from a generic search result.
 
+Every attempt can also be persisted in `source_1688_search_runs` (apply
+[supabase/migrations/20261002010000_1688_search_runs.sql](supabase/migrations/20261002010000_1688_search_runs.sql)). The queue CLI exports a bounded batch and ingests browser/API results without publishing anything:
+
+```powershell
+node scripts/1688_search_queue.mjs --export --limit=25
+node scripts/1688_search_queue.mjs --ingest --input=.tmp/1688-search-results.json --mark-review
+```
+
+`--mark-review` only records the best candidate as `REVIEW`; an administrator
+must compare the logo, colour and silhouette and explicitly choose `MATCHED`
+before a hat can be sold. Keep any 1688 API/service key server-side.
+
 ### Sync hat products from Custom POD
 
 The import helper is [scripts/sync_hats_from_custom_pod.mjs](scripts/sync_hats_from_custom_pod.mjs). It imports only `PUBLISHED` products in the `Caps` or `Knit Hats` groups, upserts their variants, and does not delete existing destination rows.

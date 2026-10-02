@@ -134,7 +134,11 @@ It never deletes destination rows.
 3. Set `profiles.role = 'admin'` for the real admin user after Auth signup.
 4. Verify `/collections`, `/product/:handle`, `/admin`, a search query and one
    checkout order on the Vercel deployment.
-5. Verify a representative batch on 1688, set `MATCHED` only when the source
+5. Apply `20261002010000_1688_search_runs.sql` and use
+   `scripts/1688_search_queue.mjs` to export bounded jobs and ingest the
+   candidate payloads. The audit table makes each image-search attempt
+   idempotent by product and image hash.
+6. Verify a representative batch on 1688, set `MATCHED` only when the source
    listing is genuinely comparable, and leave uncertain results in `REVIEW`.
-6. Keep the service role key only in the local sync command or a server-side
+7. Keep the service role key only in the local sync command or a server-side
    secret; never put it in Vite client variables.

@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "db:seed": "node supabase/seed_products.mjs",
-    "db:sync-hats": "node scripts/sync_hats_from_custom_pod.mjs"
+    "db:sync-hats": "node scripts/sync_hats_from_custom_pod.mjs",
+    "1688:queue": "node scripts/1688_search_queue.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",
