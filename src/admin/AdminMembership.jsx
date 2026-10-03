@@ -1,15 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Users, Award, Sparkles, Clock, ShieldCheck, Plus, 
-  Search, Edit3, ArrowRight, Save, CheckCircle2, Star, Flame, Crown 
+  Search, Edit3, ArrowRight, Save, CheckCircle2, Star, Flame, Crown, X, Mail, CalendarDays, ShoppingBag
 } from 'lucide-react';
 
-export default function AdminMembership({ members, onSaveMembers }) {
+export default function AdminMembership({ members, onSaveMembers, settings = {}, onSaveSettings }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [query, setQuery] = useState('');
   const [tierFilter, setTierFilter] = useState('ALL');
   const [notice, setNotice] = useState('');
   const [membersList, setMembersList] = useState(members);
+  const [selectedMemberId, setSelectedMemberId] = useState(null);
 
   // VIP Program Rules State
   const [programRules, setProgramRules] = useState({
@@ -21,8 +22,15 @@ export default function AdminMembership({ members, onSaveMembers }) {
     earlyAccessMins: 15,
     hofEarlyAccessMins: 30,
     exclusiveDrops: true,
-    freeShippingHof: true
+    freeShippingHof: true,
+    ...(settings.accessPass || {}),
   });
+
+  const selectedMember = membersList.find((member) => member.id === selectedMemberId) || null;
+
+  useEffect(() => {
+    setMembersList(Array.isArray(members) ? members : []);
+  }, [members]);
 
   // Filter members
   const filteredMembers = membersList.filter(m => {
@@ -56,6 +64,7 @@ export default function AdminMembership({ members, onSaveMembers }) {
 
   const handleSaveRules = (e) => {
     e.preventDefault();
+    onSaveSettings?.({ ...settings, accessPass: programRules });
     setNotice('Access Pass VIP rules and early drop release windows saved!');
     setTimeout(() => setNotice(''), 3500);
   };
@@ -256,7 +265,7 @@ export default function AdminMembership({ members, onSaveMembers }) {
                   {filteredMembers.map(m => (
                     <tr key={m.id} className="hover:bg-[#181818] transition-colors">
                       <td>
-                        <div className="font-bold text-white text-xs">{m.name}</div>
+                        <button type="button" onClick={() => setSelectedMemberId(m.id)} className="text-left font-bold text-white text-xs hover:text-[#ff3b30]">{m.name}</button>
                         <div className="text-[11px] text-zinc-500">{m.email}</div>
                       </td>
                       <td>
@@ -408,6 +417,22 @@ export default function AdminMembership({ members, onSaveMembers }) {
             </div>
           </div>
         </form>
+      )}
+
+      {selectedMember && (
+        <div className="admin-drawer-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedMemberId(null); }}>
+          <aside className="admin-drawer" role="dialog" aria-modal="true" aria-labelledby="customer-detail-title">
+            <header className="admin-drawer-header">
+              <div><span className="admin-intro-eyebrow">CUSTOMER / ACCESS PASS PROFILE</span><h2 id="customer-detail-title">Customer details</h2><p>Thông tin thành viên và quyền lợi được lưu trong hồ sơ Supabase.</p></div>
+              <button type="button" className="admin-icon-button" onClick={() => setSelectedMemberId(null)} aria-label="Close customer details"><X size={18} /></button>
+            </header>
+            <div className="admin-drawer-body">
+              <div className="admin-drawer-status-strip"><div><strong>{selectedMember.name}</strong><div className="admin-drawer-status-value"><span className={`px-2 py-0.5 rounded border text-[10px] font-black uppercase ${getTierBadge(selectedMember.tier)}`}>{selectedMember.tier}</span><span className="text-xs text-zinc-500">{selectedMember.points.toLocaleString()} points</span></div></div><Users size={22} className="text-[#ff3b30]" /></div>
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3>Contact & profile</h3><span className="admin-section-count">Customer record</span></div><div className="space-y-3 text-xs"><div className="flex items-center gap-2 text-zinc-300"><Mail size={14} className="text-zinc-500" />{selectedMember.email || 'Email not available'}</div><div className="flex items-center gap-2 text-zinc-300"><CalendarDays size={14} className="text-zinc-500" />Joined {selectedMember.joinedDate || 'Date not available'}</div><div className="flex items-center gap-2 text-zinc-300"><ShoppingBag size={14} className="text-zinc-500" />{selectedMember.ordersCount || 0} orders placed</div><div className="flex items-center gap-2 text-zinc-300"><Award size={14} className="text-zinc-500" />Preferred fitted size {selectedMember.preferredSize || 'Not set'}</div></div></section>
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3>Points actions</h3><span className="admin-section-count">Manual adjustment</span></div><p className="admin-form-help">Điều chỉnh điểm sẽ tự cập nhật tier theo ngưỡng Access Pass hiện tại.</p><div className="flex gap-2"><button type="button" className="btn-secondary flex-1 text-xs" onClick={() => handleAdjustPoints(selectedMember.id, 100)}>+100 points</button><button type="button" className="btn-secondary flex-1 text-xs" onClick={() => handleAdjustPoints(selectedMember.id, -100)}>-100 points</button></div></section>
+            </div>
+          </aside>
+        </div>
       )}
     </div>
   );

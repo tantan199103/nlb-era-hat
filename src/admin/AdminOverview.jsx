@@ -216,6 +216,22 @@ export default function AdminOverview({
                 <span>Access Pass VIP Tier Approvals</span>
                 <ChevronRight size={14} className="text-gray-500" />
               </button>
+
+              <button
+                onClick={() => onNavigateTab('analytics')}
+                className="w-full p-2.5 bg-[#181818] hover:bg-[#222222] border border-[#282828] rounded-lg text-left text-xs font-bold text-white flex items-center justify-between transition-colors cursor-pointer"
+              >
+                <span>Open sales & catalog analytics</span>
+                <ChevronRight size={14} className="text-gray-500" />
+              </button>
+
+              <button
+                onClick={() => onNavigateTab('discounts')}
+                className="w-full p-2.5 bg-[#181818] hover:bg-[#222222] border border-[#282828] rounded-lg text-left text-xs font-bold text-white flex items-center justify-between transition-colors cursor-pointer"
+              >
+                <span>Create a checkout discount</span>
+                <ChevronRight size={14} className="text-gray-500" />
+              </button>
             </div>
           </div>
 

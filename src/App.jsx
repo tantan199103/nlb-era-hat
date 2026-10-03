@@ -43,7 +43,10 @@ function readStorefrontRoute() {
   const params = new URLSearchParams(window.location.search);
   const policySlug = pathname.slice(1);
   if (['about', 'privacy', 'terms', 'sustainability', 'accessibility'].includes(policySlug)) return { view: 'policy', params: { slug: policySlug } };
-  if (pathname === '/admin' || pathname.startsWith('/admin/')) return { view: 'admin', params: {} };
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+    const tab = pathname.slice('/admin'.length).replace(/^\/+/, '') || 'overview';
+    return { view: 'admin', params: { tab } };
+  }
   if (pathname === '/collections' || pathname === '/shop' || pathname.startsWith('/category/')) {
     const routeParams = Object.fromEntries(params.entries());
     if (routeParams.stock === '1') routeParams.inStockOnly = true;
@@ -69,7 +72,7 @@ function routePath(view, params = {}, product = null) {
     return `/collections${suffix ? `?${suffix}` : ''}`;
   }
   if (view === 'product') return `/product/${encodeURIComponent(product?.handle || product?.id || '')}`;
-  if (view === 'admin') return '/admin';
+  if (view === 'admin') return params.tab && params.tab !== 'overview' ? `/admin/${params.tab}` : '/admin';
   if (view === 'access-pass') return '/access-pass';
   if (view === 'stores') return '/stores';
   if (view === 'track-order') return '/track-order';
@@ -272,6 +275,7 @@ export default function App() {
       const route = readStorefrontRoute();
       setCurrentView(route.view);
       setActiveCatalogParams(route.params || {});
+      if (route.view === 'admin') setAdminTab(route.params?.tab || 'overview');
       setActiveLeagueFilter(route.params?.league || null);
       setActiveTeamFilter(route.params?.team || null);
       setActiveSearchFilter(route.params?.search || '');
@@ -416,6 +420,12 @@ export default function App() {
       setSelectedProductForPDP(params.product);
     }
 
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleAdminTabChange = (tab) => {
+    setAdminTab(tab);
+    window.history.pushState({}, '', routePath('admin', { tab }));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -588,7 +598,7 @@ export default function App() {
     return (
       <AdminShell 
         currentTab={adminTab}
-        onTabChange={setAdminTab}
+        onTabChange={handleAdminTabChange}
         onExitAdmin={() => handleNavigate('home')}
         products={catalogProducts}
         onSaveProducts={(updated) => setCatalogProducts(updated)}

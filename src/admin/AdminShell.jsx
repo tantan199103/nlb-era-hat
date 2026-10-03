@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { 
   Flame, LayoutDashboard, Package, Layers, Menu as MenuIcon, 
-  Truck, Users, Settings, ExternalLink, ChevronRight, Bell, 
+  Truck, Users, Settings, ExternalLink, ChevronRight, Bell, TrendingUp, Tag,
   Sparkles, ShieldCheck, Plus, ArrowLeft, Menu, X 
 } from 'lucide-react';
 import AdminOverview from './AdminOverview';
@@ -11,6 +11,8 @@ import AdminMenus from './AdminMenus';
 import AdminOrders from './AdminOrders';
 import AdminMembership from './AdminMembership';
 import AdminSettings from './AdminSettings';
+import AdminAnalytics from './AdminAnalytics';
+import AdminDiscounts from './AdminDiscounts';
 import './admin.css';
 import AdminAccess from './AdminAccess';
 import {
@@ -185,33 +187,29 @@ export default function AdminShell({
     {
       group: 'MAIN',
       items: [
-        { id: 'overview', label: 'Dashboard Overview', icon: LayoutDashboard }
+        { id: 'overview', label: 'Home', icon: LayoutDashboard },
+        { id: 'analytics', label: 'Analytics', icon: TrendingUp }
       ]
     },
     {
-      group: 'CATALOG & MERCHANDISE',
+      group: 'SALES & CATALOG',
       items: [
-        { id: 'products', label: 'Drop Inventory', icon: Package, badge: catalogRowCount.toLocaleString() },
-        { id: 'collections', label: 'Curated Drops', icon: Layers, badge: collections.length }
+        { id: 'orders', label: 'Orders', icon: Truck, badge: unfulfilledOrdersCount > 0 ? `${unfulfilledOrdersCount} new` : null, badgeColor: 'bg-red-600 text-white' },
+        { id: 'products', label: 'Products', icon: Package, badge: catalogRowCount.toLocaleString() },
+        { id: 'collections', label: 'Collections', icon: Layers, badge: collections.length },
+        { id: 'discounts', label: 'Discounts', icon: Tag, badge: settings?.promoCodes?.filter((promo) => promo.active !== false).length || null, badgeColor: 'bg-amber-950 text-amber-300' }
       ]
     },
     {
-      group: 'STOREFRONT EXPERIENCE',
+      group: 'CUSTOMERS',
       items: [
-        { id: 'menus', label: 'Dynamic Menus', icon: MenuIcon, badge: menus.length }
+        { id: 'membership', label: 'Customers & VIP', icon: Users, badge: members.length }
       ]
     },
     {
-      group: 'OPERATIONS & GROWTH',
+      group: 'CONTENT',
       items: [
-        { 
-          id: 'orders', 
-          label: 'Orders & Fulfillment', 
-          icon: Truck, 
-          badge: unfulfilledOrdersCount > 0 ? `${unfulfilledOrdersCount} new` : null,
-          badgeColor: 'bg-red-600 text-white' 
-        },
-        { id: 'membership', label: 'Access Pass VIP', icon: Users, badge: members.length }
+        { id: 'menus', label: 'Navigation', icon: MenuIcon, badge: menus.length }
       ]
     },
     {
@@ -340,7 +338,7 @@ export default function AdminShell({
             <div className="flex items-center gap-2 text-xs font-bold">
               <span className="text-zinc-500 uppercase tracking-wider">LIDS HAT DROP</span>
               <ChevronRight size={14} className="text-zinc-600" />
-              <span className="text-white uppercase tracking-wider">{currentTab}</span>
+              <span className="text-white uppercase tracking-wider">{({ overview: 'Home', analytics: 'Analytics', orders: 'Orders', products: 'Products', collections: 'Collections', discounts: 'Discounts', membership: 'Customers & VIP', menus: 'Navigation', settings: 'Settings' })[currentTab] || currentTab}</span>
             </div>
           </div>
 
@@ -394,6 +392,16 @@ export default function AdminShell({
             />
           )}
 
+          {currentTab === 'analytics' && (
+            <AdminAnalytics
+              products={products}
+              orders={orders}
+              members={members}
+              catalogStats={catalogStats}
+              currency={currency}
+            />
+          )}
+
           {currentTab === 'collections' && (
             <AdminCollections 
               collections={collections}
@@ -425,6 +433,15 @@ export default function AdminShell({
             <AdminMembership 
               members={members}
               onSaveMembers={onSaveMembers}
+              settings={settings}
+              onSaveSettings={saveSettings}
+            />
+          )}
+
+          {currentTab === 'discounts' && (
+            <AdminDiscounts
+              settings={settings}
+              onSaveSettings={saveSettings}
             />
           )}
 
@@ -432,6 +449,7 @@ export default function AdminShell({
             <AdminSettings 
               settings={settings}
               onSaveSettings={saveSettings}
+              onNavigateTab={onTabChange}
             />
           )}
         </main>

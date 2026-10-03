@@ -4,7 +4,7 @@ import {
   CheckCircle2, Plus, Trash2, Shield, Globe, Sparkles 
 } from 'lucide-react';
 
-export default function AdminSettings({ settings, onSaveSettings }) {
+export default function AdminSettings({ settings, onSaveSettings, onNavigateTab }) {
   const [form, setForm] = useState(settings);
   const [notice, setNotice] = useState('');
   const [newPromoCode, setNewPromoCode] = useState({ code: '', discountPercent: 15 });
@@ -158,14 +158,12 @@ export default function AdminSettings({ settings, onSaveSettings }) {
 
         {/* Promo Codes Engine */}
         <div className="admin-panel space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-black text-white uppercase flex items-center gap-2">
               <Tag className="text-amber-400" size={16} />
               <span>Active Drop Promo Codes</span>
             </h3>
-            <span className="text-xs text-zinc-400 font-mono">
-              {form.promoCodes?.length || 0} Codes
-            </span>
+            <div className="flex items-center gap-3"><span className="text-xs text-zinc-400 font-mono">{form.promoCodes?.length || 0} Codes</span><button type="button" onClick={() => onNavigateTab?.('discounts')} className="text-[10px] font-black uppercase tracking-wider text-[#ff3b30] hover:underline">Open Discounts</button></div>
           </div>
 
           {/* List of active codes */}
