@@ -507,7 +507,15 @@ export async function fetchAdminCatalogStats(fallback = null) {
       count(supabase.from('products').select('id', { count: 'exact', head: true }).eq('source_1688_status', 'REVIEW')),
       count(supabase.from('products').select('id', { count: 'exact', head: true }).eq('source_1688_status', 'NOT_FOUND')),
     ]);
-    return { matchedActive, matched, pending, review, notFound, queue: pending + review + notFound };
+    return {
+      total: matched + pending + review + notFound,
+      matchedActive,
+      matched,
+      pending,
+      review,
+      notFound,
+      queue: pending + review + notFound,
+    };
   } catch (error) {
     console.warn('Supabase catalog stats failed:', error.message);
     return fallback;

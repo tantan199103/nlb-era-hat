@@ -69,7 +69,7 @@ export default function AdminProducts({
     })).length;
     const sourceQueue = rows.filter((product) => (product.source1688Status || 'PENDING') !== 'MATCHED').length;
     return {
-      total: catalogStats?.matched != null ? Number(catalogStats.matched) : rows.length,
+      total: catalogStats?.total != null ? Number(catalogStats.total) : rows.length,
       sellable: catalogStats?.matchedActive != null ? Number(catalogStats.matchedActive) : rows.filter((product) => product.source1688Status === 'MATCHED' && product.status !== 'DRAFT').length,
       sourceQueue: catalogStats?.queue != null ? Number(catalogStats.queue) : sourceQueue,
       lowStock,
