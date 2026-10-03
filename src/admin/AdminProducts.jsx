@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { formatPrice } from '../utils/currency';
 import { supabase } from '../lib/supabase';
-import { fetchCatalogPage } from '../services/catalogApi';
+import { fetchCatalogFacets, fetchCatalogPage } from '../services/catalogApi';
 import { validateProduct } from '../lib/adminOperations';
 
 export default function AdminProducts({ 
@@ -22,8 +22,12 @@ export default function AdminProducts({
 }) {
   const [query, setQuery] = useState('');
   const [selectedLeague, setSelectedLeague] = useState('ALL');
+  const [selectedGroup, setSelectedGroup] = useState('');
+  const [selectedSilhouette, setSelectedSilhouette] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [selectedSourceStatus, setSelectedSourceStatus] = useState('ALL');
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [facets, setFacets] = useState(null);
   const [editingProduct, setEditingProduct] = useState(null);
   const [editorForm, setEditorForm] = useState(null);
   const [editorSaving, setEditorSaving] = useState(false);
@@ -44,6 +48,7 @@ export default function AdminProducts({
   const [remotePages, setRemotePages] = useState(1);
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [debouncedQuery, setDebouncedQuery] = useState('');
 
   // Form state for creating / editing product
   const [formState, setFormState] = useState({
@@ -59,10 +64,43 @@ export default function AdminProducts({
     status: 'PUBLISHED'
   });
 
-  const leagues = ['ALL', 'MLB', 'NBA', 'NFL', 'NHL', 'MiLB', 'PINS'];
+  const facetValues = (key) => (Array.isArray(facets?.[key]) ? facets[key] : [])
+    .map((item) => typeof item === 'string' ? item : item?.value)
+    .filter(Boolean);
+  const loadedRows = [...(Array.isArray(products) ? products : []), ...(Array.isArray(remoteRows) ? remoteRows : [])];
+  const loadedFacetValues = (key) => loadedRows
+    .map((product) => key === 'groups' ? (product.productGroup || product.product_group) : product[key === 'silhouettes' ? 'silhouette' : 'league'])
+    .filter(Boolean);
+  const leagues = useMemo(() => [
+    'ALL',
+    ...new Set(['MLB', 'NBA', 'NFL', 'NHL', 'MiLB', 'NCAA', 'OTHER', 'PINS', ...facetValues('leagues'), ...loadedFacetValues('leagues')]),
+  ], [facets, products, remoteRows]);
+  const groupOptions = useMemo(() => [...new Set([...facetValues('groups'), ...loadedFacetValues('groups')])].sort((a, b) => a.localeCompare(b)), [facets, products, remoteRows]);
+  const silhouetteOptions = useMemo(() => [...new Set([...facetValues('silhouettes'), ...loadedFacetValues('silhouettes')])].sort((a, b) => a.localeCompare(b)), [facets, products, remoteRows]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    if (!supabase) {
+      setFacets(null);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchCatalogFacets({ category: 'hats' })
+      .then((result) => {
+        if (!cancelled) setFacets(result || null);
+      })
+      .catch(() => {
+        if (!cancelled) setFacets(null);
+      });
+    return () => { cancelled = true; };
+  }, [refreshKey]);
 
   const productMetrics = useMemo(() => {
-    const rows = Array.isArray(products) ? products : [];
+    const rows = Array.isArray(remoteRows) ? remoteRows : (Array.isArray(products) ? products : []);
     const lowStock = rows.filter((product) => (product.sizes || []).some((variant) => {
       const count = Number(variant.inventoryCount ?? variant.inventory_count);
       return Number.isFinite(count) && count > 0 && count <= 2;
@@ -74,7 +112,7 @@ export default function AdminProducts({
       sourceQueue: catalogStats?.queue != null ? Number(catalogStats.queue) : sourceQueue,
       lowStock,
     };
-  }, [catalogStats, products]);
+  }, [catalogStats, products, remoteRows]);
 
   // Filtered Products
   const filteredProducts = useMemo(() => {
@@ -82,16 +120,21 @@ export default function AdminProducts({
       const matchQuery = !query.trim() || 
         String(p.title || '').toLowerCase().includes(query.toLowerCase()) ||
         String(p.team || '').toLowerCase().includes(query.toLowerCase()) ||
-        String(p.sku || '').toLowerCase().includes(query.toLowerCase());
+        String(p.sku || p.sourceSku || '').toLowerCase().includes(query.toLowerCase()) ||
+        String(p.badge || '').toLowerCase().includes(query.toLowerCase()) ||
+        String(p.productGroup || p.product_group || '').toLowerCase().includes(query.toLowerCase());
       
       const matchLeague = selectedLeague === 'ALL' || p.league?.toUpperCase() === selectedLeague.toUpperCase();
+      const matchGroup = !selectedGroup || (p.productGroup || p.product_group || '') === selectedGroup;
+      const matchSilhouette = !selectedSilhouette || String(p.silhouette || '').toLowerCase().includes(selectedSilhouette.toLowerCase());
       const matchStatus = selectedStatus === 'ALL' || (p.status || 'PUBLISHED') === selectedStatus;
       const matchSourceStatus = selectedSourceStatus === 'ALL'
-        || (p.source1688Status || 'PENDING') === selectedSourceStatus;
+        || (selectedSourceStatus === 'QUEUE' ? (p.source1688Status || 'PENDING') !== 'MATCHED' : (p.source1688Status || 'PENDING') === selectedSourceStatus);
+      const matchStock = !inStockOnly || (p.sizes || []).some((variant) => Number(variant.inventoryCount ?? variant.inventory_count) > 0 || variant.inStock);
 
-      return matchQuery && matchLeague && matchStatus && matchSourceStatus;
+      return matchQuery && matchLeague && matchGroup && matchSilhouette && matchStatus && matchSourceStatus && matchStock;
     });
-  }, [products, query, selectedLeague, selectedStatus, selectedSourceStatus]);
+  }, [products, query, selectedLeague, selectedGroup, selectedSilhouette, selectedStatus, selectedSourceStatus, inStockOnly]);
 
   useEffect(() => {
     if (!supabase) { setRemoteRows(null); return undefined; }
@@ -100,8 +143,11 @@ export default function AdminProducts({
     fetchCatalogPage({
       page: catalogPage,
       pageSize: 24,
-      query,
+      query: debouncedQuery,
       league: selectedLeague === 'ALL' ? '' : selectedLeague,
+      group: selectedGroup,
+      silhouette: selectedSilhouette,
+      inStockOnly,
       category: 'hats',
       includeInactive: true,
       status: selectedStatus === 'ALL' ? '' : selectedStatus,
@@ -117,9 +163,9 @@ export default function AdminProducts({
       if (!cancelled) setRemoteLoading(false);
     });
     return () => { cancelled = true; };
-  }, [catalogPage, query, selectedLeague, selectedStatus, selectedSourceStatus, refreshKey]);
+  }, [catalogPage, debouncedQuery, selectedLeague, selectedGroup, selectedSilhouette, selectedStatus, selectedSourceStatus, inStockOnly, refreshKey]);
 
-  useEffect(() => { setCatalogPage(1); }, [query, selectedLeague, selectedStatus, selectedSourceStatus]);
+  useEffect(() => { setCatalogPage(1); }, [query, selectedLeague, selectedGroup, selectedSilhouette, selectedStatus, selectedSourceStatus, inStockOnly]);
 
   const displayedProducts = remoteRows ?? filteredProducts;
   const displayedCount = remoteRows ? remoteCount : filteredProducts.length;
@@ -428,7 +474,7 @@ export default function AdminProducts({
 
       {/* The catalog is a source-verification queue first, and a product list second. */}
       <section className="admin-kpi-grid admin-product-kpis" aria-label="Catalog summary">
-        <button type="button" className="admin-kpi-card admin-kpi-button is-neutral" onClick={() => { setSelectedSourceStatus('ALL'); setSelectedStatus('ALL'); }}>
+        <button type="button" className="admin-kpi-card admin-kpi-button is-neutral" onClick={() => { setSelectedSourceStatus('ALL'); setSelectedStatus('ALL'); setSelectedLeague('ALL'); setSelectedGroup(''); setSelectedSilhouette(''); setInStockOnly(false); }}>
           <span className="admin-kpi-label"><Boxes size={13} /> Catalog rows</span>
           <strong className="admin-kpi-value">{productMetrics.total.toLocaleString()}</strong>
           <span className="admin-kpi-note">All hat records in Supabase</span>
@@ -438,15 +484,15 @@ export default function AdminProducts({
           <strong className="admin-kpi-value">{productMetrics.sellable.toLocaleString()}</strong>
           <span className="admin-kpi-note">MATCHED + published</span>
         </button>
-        <button type="button" className="admin-kpi-card admin-kpi-button is-warning" onClick={() => { setSelectedSourceStatus('REVIEW'); setSelectedStatus('ALL'); }}>
+        <button type="button" className="admin-kpi-card admin-kpi-button is-warning" onClick={() => { setSelectedSourceStatus('QUEUE'); setSelectedStatus('ALL'); }}>
           <span className="admin-kpi-label"><CircleAlert size={13} /> Source queue</span>
           <strong className="admin-kpi-value">{productMetrics.sourceQueue.toLocaleString()}</strong>
-          <span className="admin-kpi-note">Needs 1688 evidence before sale</span>
+          <span className="admin-kpi-note">All records not yet MATCHED</span>
         </button>
         <button type="button" className="admin-kpi-card admin-kpi-button is-danger" onClick={() => { setSelectedStatus('ALL'); setSelectedSourceStatus('ALL'); }}>
           <span className="admin-kpi-label"><Warehouse size={13} /> Low stock</span>
           <strong className="admin-kpi-value">{productMetrics.lowStock.toLocaleString()}</strong>
-          <span className="admin-kpi-note">On the currently loaded page</span>
+          <span className="admin-kpi-note">Detected in the loaded result set</span>
         </button>
       </section>
 
@@ -458,7 +504,7 @@ export default function AdminProducts({
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500" />
           <input 
             type="text" 
-            placeholder="Search by title, team, SKU..."
+            placeholder="Search title, team, SKU, badge..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-full bg-[#1a1a1a] border border-[#333333] rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder:text-gray-500 focus:outline-none focus:border-white"
@@ -476,6 +522,30 @@ export default function AdminProducts({
               className="bg-[#1a1a1a] border border-[#333333] rounded px-2.5 py-1.5 text-xs text-white font-bold focus:outline-none"
             >
               {leagues.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-bold text-gray-500 uppercase">Group:</span>
+            <select
+              value={selectedGroup}
+              onChange={(e) => setSelectedGroup(e.target.value)}
+              className="max-w-[150px] bg-[#1a1a1a] border border-[#333333] rounded px-2.5 py-1.5 text-xs text-white font-bold focus:outline-none"
+            >
+              <option value="">All groups</option>
+              {groupOptions.map((group) => <option key={group} value={group}>{group}</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-bold text-gray-500 uppercase">Silhouette:</span>
+            <select
+              value={selectedSilhouette}
+              onChange={(e) => setSelectedSilhouette(e.target.value)}
+              className="max-w-[150px] bg-[#1a1a1a] border border-[#333333] rounded px-2.5 py-1.5 text-xs text-white font-bold focus:outline-none"
+            >
+              <option value="">All silhouettes</option>
+              {silhouetteOptions.map((silhouette) => <option key={silhouette} value={silhouette}>{silhouette}</option>)}
             </select>
           </div>
 
@@ -501,12 +571,36 @@ export default function AdminProducts({
               className="bg-[#1a1a1a] border border-[#333333] rounded px-2.5 py-1.5 text-xs text-white font-bold focus:outline-none"
             >
               <option value="ALL">All checks</option>
+              <option value="QUEUE">Source queue (not matched)</option>
               <option value="PENDING">Pending</option>
               <option value="REVIEW">Review</option>
               <option value="MATCHED">Matched / sellable</option>
               <option value="NOT_FOUND">Not found</option>
             </select>
           </div>
+
+          <label className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase text-gray-400">
+            <input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} className="h-3.5 w-3.5 accent-[#3ed660]" />
+            In stock
+          </label>
+
+          {(query || selectedLeague !== 'ALL' || selectedGroup || selectedSilhouette || selectedStatus !== 'ALL' || selectedSourceStatus !== 'ALL' || inStockOnly) && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                setSelectedLeague('ALL');
+                setSelectedGroup('');
+                setSelectedSilhouette('');
+                setSelectedStatus('ALL');
+                setSelectedSourceStatus('ALL');
+                setInStockOnly(false);
+              }}
+              className="text-[10px] font-black uppercase tracking-wider text-[#ff3b30] hover:underline"
+            >
+              Clear filters
+            </button>
+          )}
 
           <span className="text-xs text-gray-400 font-semibold ml-2">
             {remoteLoading ? 'Loading catalog…' : `Showing ${displayedCount.toLocaleString()} of ${displayedTotal.toLocaleString()}`}
@@ -531,6 +625,9 @@ export default function AdminProducts({
               </tr>
             </thead>
             <tbody>
+              {displayedProducts.length === 0 && !remoteLoading && (
+                <tr><td colSpan="7" className="py-12 text-center text-sm text-gray-500">No catalog rows match these filters.</td></tr>
+              )}
               {displayedProducts.map((p) => {
                 const inStockSizesCount = p.sizes?.filter((s) => s.inStock || Number(s.inventoryCount ?? s.inventory_count) > 0).length || 0;
                 return (
@@ -552,6 +649,9 @@ export default function AdminProducts({
                               {p.badge}
                             </span>
                           )}
+                          {(p.sourceSku || p.sku) && (
+                            <div className="mt-1 text-[10px] font-mono text-gray-500 truncate">SKU {p.sourceSku || p.sku}</div>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -560,6 +660,7 @@ export default function AdminProducts({
                     <td>
                       <div className="font-bold text-white text-xs">{p.team}</div>
                       <div className="text-[10px] text-gray-500 uppercase">{p.league}</div>
+                      {p.productGroup && <div className="max-w-[150px] truncate text-[10px] text-zinc-500">{p.productGroup}</div>}
                     </td>
 
                     {/* Silhouette */}
@@ -574,9 +675,13 @@ export default function AdminProducts({
 
                     {/* Sizes Count */}
                     <td>
-                      <span className="text-xs font-semibold text-gray-300">
-                        {inStockSizesCount} / {p.sizes?.length || 8} sizes in stock
-                      </span>
+                      {p.sizes?.length ? (
+                        <span className="text-xs font-semibold text-gray-300">
+                          {inStockSizesCount} / {p.sizes.length} sizes in stock
+                        </span>
+                      ) : (
+                        <span className="text-xs font-semibold text-amber-300">No variants</span>
+                      )}
                     </td>
 
                     {/* Status Toggle */}
@@ -783,6 +888,9 @@ export default function AdminProducts({
             </div>
 
             <form onSubmit={handleCreateProduct} className="space-y-4">
+              <div className="rounded border border-amber-800/50 bg-amber-950/25 px-3 py-2 text-[11px] leading-5 text-amber-200">
+                Sản phẩm mới sẽ được lưu dưới dạng <strong>Draft</strong>. Chỉ sau khi đối chiếu URL listing tương ứng trên 1688 và đặt trạng thái MATCHED mới có thể publish.
+              </div>
               <div>
                 <label className="text-xs font-bold text-gray-400 block mb-1">Product Title</label>
                 <input 
@@ -868,7 +976,7 @@ export default function AdminProducts({
                   type="submit"
                   className="btn-flame text-xs px-5 py-2 font-bold"
                 >
-                  Publish Drop
+                  Save draft
                 </button>
               </div>
             </form>

@@ -62,6 +62,7 @@ export default function AdminShell({
 
   // Unfulfilled orders count for badge
   const unfulfilledOrdersCount = orders.filter(o => o.fulfillmentStatus === 'UNFULFILLED').length;
+  const catalogRowCount = catalogStats?.total != null ? Number(catalogStats.total) : products.length;
 
   useEffect(() => {
     let active = true;
@@ -190,7 +191,7 @@ export default function AdminShell({
     {
       group: 'CATALOG & MERCHANDISE',
       items: [
-        { id: 'products', label: 'Drop Inventory', icon: Package, badge: products.length },
+        { id: 'products', label: 'Drop Inventory', icon: Package, badge: catalogRowCount.toLocaleString() },
         { id: 'collections', label: 'Curated Drops', icon: Layers, badge: collections.length }
       ]
     },

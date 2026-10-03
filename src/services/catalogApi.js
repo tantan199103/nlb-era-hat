@@ -48,6 +48,19 @@ function applySort(query, sortBy) {
   return query.order('updated_at', { ascending: false });
 }
 
+function buildSearchFilter(pattern) {
+  return [
+    `title.ilike.${pattern}`,
+    `handle.ilike.${pattern}`,
+    `team.ilike.${pattern}`,
+    `league.ilike.${pattern}`,
+    `silhouette.ilike.${pattern}`,
+    `badge.ilike.${pattern}`,
+    `description.ilike.${pattern}`,
+    `metadata->>source_sku.ilike.${pattern}`,
+  ].join(',');
+}
+
 /**
  * Fetch one bounded catalog page. The previous storefront loaded every row
  * and every variant on first paint; this keeps the browser response bounded
@@ -90,7 +103,14 @@ export async function fetchCatalogPage({
     // sell gate visible in the client query as well as in the database.
     request = request.eq('source_1688_status', 'MATCHED');
   }
-  if (sourceStatus) request = request.eq('source_1688_status', sourceStatus);
+  if (sourceStatus === 'QUEUE') {
+    // The queue is every record that still lacks a verified 1688 match. Keep
+    // this as a server-side predicate so the 26k-row catalog is not filtered
+    // in the browser.
+    request = request.neq('source_1688_status', 'MATCHED');
+  } else if (sourceStatus) {
+    request = request.eq('source_1688_status', sourceStatus);
+  }
   if (category) request = request.eq('category', category);
   if (league) request = request.eq('league', league);
   if (team) request = request.ilike('team', `%${safeTerm(team)}%`);
@@ -105,14 +125,7 @@ export async function fetchCatalogPage({
   const term = safeTerm(query);
   if (term) {
     const pattern = `%${term}%`;
-    request = request.or([
-      `title.ilike.${pattern}`,
-      `handle.ilike.${pattern}`,
-      `team.ilike.${pattern}`,
-      `league.ilike.${pattern}`,
-      `silhouette.ilike.${pattern}`,
-      `description.ilike.${pattern}`,
-    ].join(','));
+    request = request.or(buildSearchFilter(pattern));
   }
 
   request = applySort(request, sortBy).range(start, end);
@@ -140,14 +153,7 @@ export async function fetchCatalogSearch(query, { limit = 12, category = 'hats' 
     .eq('is_active', true)
     .eq('source_1688_status', 'MATCHED')
     .eq('category', category)
-    .or([
-      `title.ilike.${pattern}`,
-      `handle.ilike.${pattern}`,
-      `team.ilike.${pattern}`,
-      `league.ilike.${pattern}`,
-      `silhouette.ilike.${pattern}`,
-      `description.ilike.${pattern}`,
-    ].join(','))
+    .or(buildSearchFilter(pattern))
     .limit(Math.max(1, Math.min(40, limit * 3)));
   const { data, error } = await request;
   if (error) throw new Error(`Catalog search failed: ${error.message}`);

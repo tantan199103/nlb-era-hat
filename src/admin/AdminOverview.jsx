@@ -20,7 +20,8 @@ export default function AdminOverview({
   const safeMembers = Array.isArray(members) ? members : [];
   const safeCollections = Array.isArray(collections) ? collections : [];
   const metrics = getAdminMetrics({ products: safeProducts, orders: safeOrders });
-  const publishedCount = Number.isFinite(Number(catalogStats?.matchedActive)) ? Number(catalogStats.matchedActive) : metrics.publishedCount;
+  const sellableCount = Number.isFinite(Number(catalogStats?.matchedActive)) ? Number(catalogStats.matchedActive) : metrics.publishedCount;
+  const catalogTotal = Number.isFinite(Number(catalogStats?.total)) ? Number(catalogStats.total) : safeProducts.length;
   const sourceQueueCount = Number.isFinite(Number(catalogStats?.queue)) ? Number(catalogStats.queue) : metrics.sourceQueueCount;
   const revenueText = Object.entries(metrics.revenueByCurrency).map(([code, value]) => formatOrderAmount(value, code)).join(' + ') || formatOrderAmount(0, currency);
 
@@ -33,7 +34,7 @@ export default function AdminOverview({
           <div className="admin-intro-eyebrow">STORE OPERATIONS & CONTROL ROOM</div>
           <h1>DASHBOARD OVERVIEW</h1>
           <p className="admin-intro-desc">
-            Monitor real-time drop demand, active New Era 59FIFTY inventory, fulfillment milestones, and Access Pass VIP growth.
+            Monitor the full hat catalog, verified 1688 source coverage, fulfillment milestones, and Access Pass VIP growth.
           </p>
         </div>
 
@@ -62,9 +63,9 @@ export default function AdminOverview({
 
         {/* Live Products */}
         <div className="admin-kpi-card border-l-4 border-l-[#3ed660]">
-          <span className="admin-kpi-label">ACTIVE DROP LISTINGS</span>
-          <div className="admin-kpi-value">{publishedCount}</div>
-          <div className="admin-kpi-note">{safeProducts.length ? `${safeProducts.length} loaded` : 'No products loaded'} · {metrics.inventoryKnownCount ? `${metrics.lowStockCount} low-stock` : 'Inventory data not loaded'}</div>
+          <span className="admin-kpi-label">SELLABLE LISTINGS</span>
+          <div className="admin-kpi-value">{sellableCount.toLocaleString()}</div>
+          <div className="admin-kpi-note">{catalogTotal.toLocaleString()} catalog rows · {metrics.inventoryKnownCount ? `${metrics.lowStockCount} low-stock` : 'Inventory data not loaded'}</div>
         </div>
 
         {/* Pending Orders */}
@@ -92,7 +93,7 @@ export default function AdminOverview({
         <button onClick={() => onNavigateTab('products')} className="admin-kpi-card border-l-4 border-l-amber-400 text-left transition-colors hover:bg-[#181818]">
           <span className="admin-kpi-label">1688 SOURCE QUEUE</span>
           <div className="admin-kpi-value text-amber-300">{sourceQueueCount}</div>
-          <div className="admin-kpi-note">Only MATCHED listings can sell</div>
+          <div className="admin-kpi-note">PENDING, REVIEW and NOT_FOUND need evidence</div>
         </button>
       </div>
 
