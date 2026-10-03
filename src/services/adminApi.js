@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { mapCatalogRow } from './catalogApi';
+import { is1688OfferUrl } from '../lib/adminOperations';
 
 function sortRows(left, right) {
   return Number(left.sort_order ?? left.position ?? 0) - Number(right.sort_order ?? right.position ?? 0);
@@ -184,6 +185,10 @@ function productPayload(product = {}) {
   const source1688Status = String(
     product.source1688Status || product.source_1688_status || 'PENDING',
   ).toUpperCase();
+  const source1688Url = product.source1688Url || product.source_1688_url || '';
+  if (source1688Status === 'MATCHED' && !is1688OfferUrl(source1688Url)) {
+    throw new Error('MATCHED cần URL listing hợp lệ trên 1688.');
+  }
   const images = Array.isArray(product.images) && product.images.length
     ? product.images.filter(Boolean)
     : [product.thumbnail, product.secondaryImage || product.secondary_image].filter(Boolean);
@@ -209,7 +214,7 @@ function productPayload(product = {}) {
       ...(product.sourceSku ? { source_sku: product.sourceSku } : {}),
     },
     source_1688_status: source1688Status,
-    source_1688_url: product.source1688Url || product.source_1688_url || null,
+    source_1688_url: source1688Url || null,
     source_1688_title: product.source1688Title || product.source_1688_title || null,
     source_1688_image_url: product.source1688ImageUrl || product.source_1688_image_url || null,
     source_1688_score: product.source1688Score == null || product.source1688Score === ''
@@ -255,6 +260,25 @@ export async function saveAdminProduct(product) {
   if (variants.length) {
     const { error: variantError } = await supabase.from('product_variants').upsert(variants, { onConflict: 'id' });
     if (variantError) throw variantError;
+  }
+  // Keep the database in lockstep with the editor. Without this cleanup a
+  // removed size would remain purchasable because an old variant row survives
+  // every subsequent product save.
+  const { data: existingVariants, error: existingVariantError } = await supabase
+    .from('product_variants')
+    .select('id')
+    .eq('product_id', payload.id);
+  if (existingVariantError) throw existingVariantError;
+  const desiredVariantIds = new Set(variants.map((variant) => String(variant.id)));
+  const staleVariantIds = (existingVariants || [])
+    .map((variant) => variant.id)
+    .filter((variantId) => !desiredVariantIds.has(String(variantId)));
+  if (staleVariantIds.length) {
+    const { error: staleVariantError } = await supabase
+      .from('product_variants')
+      .delete()
+      .in('id', staleVariantIds);
+    if (staleVariantError) throw staleVariantError;
   }
 
   const { data, error } = await supabase
@@ -304,8 +328,8 @@ export async function updateAdminProduct1688Verification(productId, verification
   const allowed = new Set(['PENDING', 'MATCHED', 'NOT_FOUND', 'REVIEW']);
   if (!allowed.has(status)) throw new Error('Trạng thái xác minh 1688 không hợp lệ.');
   const sourceUrl = verification.url || verification.source1688Url || '';
-  if (status === 'MATCHED' && !String(sourceUrl).trim()) {
-    throw new Error('MATCHED phải có URL listing tương ứng trên 1688.');
+  if (status === 'MATCHED' && !is1688OfferUrl(sourceUrl)) {
+    throw new Error('MATCHED phải có URL listing hợp lệ dạng https://detail.1688.com/offer/....');
   }
   const checkedAt = verification.checkedAt || new Date().toISOString();
   const patch = {
@@ -415,7 +439,9 @@ export async function fetchAdminOrders(fallback = []) {
 
 export async function saveAdminOrder(order) {
   if (!supabase) return order;
-  const status = order.fulfillmentStatus === 'DELIVERED'
+  const status = order.fulfillmentStatus === 'CANCELLED'
+    ? 'cancelled'
+    : order.fulfillmentStatus === 'DELIVERED'
     ? 'delivered'
     : order.fulfillmentStatus === 'SHIPPED'
       ? 'shipped'

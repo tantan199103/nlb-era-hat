@@ -163,6 +163,7 @@ export default function AdminShell({
       setAdminNotice('Order fulfillment đã được lưu.');
     } catch (error) {
       setAdminNotice(`Không lưu được fulfillment: ${error.message}`);
+      throw error;
     }
   };
 
@@ -388,6 +389,7 @@ export default function AdminShell({
               onVerifyProduct1688={onVerifyProduct1688 || verifyProduct1688}
               currency={currency}
               onOpenPDP={onOpenPDP}
+              catalogStats={catalogStats}
             />
           )}
 

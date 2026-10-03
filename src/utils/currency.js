@@ -9,9 +9,10 @@ export const currencies = {
 };
 
 export function formatPrice(priceInUSD, currencyKey = 'USD') {
-  const num = typeof priceInUSD === 'number' 
-    ? priceInUSD 
-    : parseFloat(String(priceInUSD).replace(/[^0-9.]/g, '')) || 49.99;
+  const parsed = typeof priceInUSD === 'number'
+    ? priceInUSD
+    : parseFloat(String(priceInUSD ?? '').replace(/[^0-9.]/g, ''));
+  const num = Number.isFinite(parsed) ? parsed : 0;
   
   const curr = currencies[currencyKey] || currencies.USD;
   const converted = num * curr.rate;

@@ -2,11 +2,12 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   Search, Plus, Trash2, Copy, Edit3, Check, X, Filter, 
   Flame, ExternalLink, Image, ArrowUpDown, ChevronLeft, ChevronRight, RefreshCw,
-  ShieldCheck, Link2, CircleAlert
+  ShieldCheck, Link2, CircleAlert, Boxes, CircleDollarSign, Warehouse, Save, RotateCcw
 } from 'lucide-react';
 import { formatPrice } from '../utils/currency';
 import { supabase } from '../lib/supabase';
 import { fetchCatalogPage } from '../services/catalogApi';
+import { validateProduct } from '../lib/adminOperations';
 
 export default function AdminProducts({ 
   products, 
@@ -17,12 +18,15 @@ export default function AdminProducts({
   onVerifyProduct1688,
   currency = 'USD',
   onOpenPDP,
+  catalogStats = null,
 }) {
   const [query, setQuery] = useState('');
   const [selectedLeague, setSelectedLeague] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [selectedSourceStatus, setSelectedSourceStatus] = useState('ALL');
   const [editingProduct, setEditingProduct] = useState(null);
+  const [editorForm, setEditorForm] = useState(null);
+  const [editorSaving, setEditorSaving] = useState(false);
   const [verificationProduct, setVerificationProduct] = useState(null);
   const [verificationForm, setVerificationForm] = useState({
     status: 'MATCHED',
@@ -57,13 +61,28 @@ export default function AdminProducts({
 
   const leagues = ['ALL', 'MLB', 'NBA', 'NFL', 'NHL', 'MiLB', 'PINS'];
 
+  const productMetrics = useMemo(() => {
+    const rows = Array.isArray(products) ? products : [];
+    const lowStock = rows.filter((product) => (product.sizes || []).some((variant) => {
+      const count = Number(variant.inventoryCount ?? variant.inventory_count);
+      return Number.isFinite(count) && count > 0 && count <= 2;
+    })).length;
+    const sourceQueue = rows.filter((product) => (product.source1688Status || 'PENDING') !== 'MATCHED').length;
+    return {
+      total: catalogStats?.matched != null ? Number(catalogStats.matched) : rows.length,
+      sellable: catalogStats?.matchedActive != null ? Number(catalogStats.matchedActive) : rows.filter((product) => product.source1688Status === 'MATCHED' && product.status !== 'DRAFT').length,
+      sourceQueue: catalogStats?.queue != null ? Number(catalogStats.queue) : sourceQueue,
+      lowStock,
+    };
+  }, [catalogStats, products]);
+
   // Filtered Products
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
       const matchQuery = !query.trim() || 
-        p.title.toLowerCase().includes(query.toLowerCase()) ||
-        p.team.toLowerCase().includes(query.toLowerCase()) ||
-        (p.sku && p.sku.toLowerCase().includes(query.toLowerCase()));
+        String(p.title || '').toLowerCase().includes(query.toLowerCase()) ||
+        String(p.team || '').toLowerCase().includes(query.toLowerCase()) ||
+        String(p.sku || '').toLowerCase().includes(query.toLowerCase());
       
       const matchLeague = selectedLeague === 'ALL' || p.league?.toUpperCase() === selectedLeague.toUpperCase();
       const matchStatus = selectedStatus === 'ALL' || (p.status || 'PUBLISHED') === selectedStatus;
@@ -209,7 +228,7 @@ export default function AdminProducts({
     const nextStatus = prod.status === 'DRAFT' ? 'PUBLISHED' : 'DRAFT';
     try {
       const saved = await onToggleProductStatus?.(prod, nextStatus) || { ...prod, status: nextStatus, is_active: nextStatus === 'PUBLISHED' };
-      onSaveProducts?.(products.map(p => p.id === prod.id ? saved : p));
+      onSaveProducts?.([saved, ...products.filter((product) => product.id !== saved.id)]);
       setRemoteRows((rows) => rows ? rows.map((product) => product.id === prod.id ? saved : product) : rows);
       setNotice(`${saved.title || prod.title} is now ${nextStatus.toLowerCase()}.`);
       setRefreshKey((value) => value + 1);
@@ -262,7 +281,7 @@ export default function AdminProducts({
           is_active: verificationForm.status === 'MATCHED',
           status: verificationForm.status === 'MATCHED' ? 'PUBLISHED' : 'DRAFT',
         };
-      onSaveProducts?.(products.map((product) => product.id === saved.id ? saved : product));
+      onSaveProducts?.([saved, ...products.filter((product) => product.id !== saved.id)]);
       setRemoteRows((rows) => rows ? rows.map((product) => product.id === saved.id ? saved : product) : rows);
       setVerificationProduct(null);
       setNotice(`${saved.title || verificationProduct.title}: đã lưu trạng thái 1688 ${verificationForm.status}.`);
@@ -271,6 +290,108 @@ export default function AdminProducts({
       setNotice(`Không lưu được xác minh 1688: ${error.message}`);
     }
     setTimeout(() => setNotice(''), 5000);
+  };
+
+  const openEditor = (product) => {
+    setEditingProduct(product);
+    setEditorForm({
+      title: product.title || '',
+      team: product.team || '',
+      league: product.league || 'MLB',
+      silhouette: product.silhouette || '59FIFTY Fitted',
+      price: String(product.price || '').replace('$', ''),
+      badge: product.badge || '',
+      thumbnail: product.thumbnail || '',
+      secondaryImage: product.secondaryImage || product.secondary_image || '',
+      source1688ImageUrl: product.source1688ImageUrl || '',
+      source1688Score: product.source1688Score == null ? '' : String(product.source1688Score),
+      description: product.description || '',
+      status: product.status || (product.is_active === false ? 'DRAFT' : 'PUBLISHED'),
+      source1688Status: product.source1688Status || 'PENDING',
+      source1688Url: product.source1688Url || '',
+      source1688Title: product.source1688Title || '',
+      source1688Note: product.source1688Note || '',
+      sizes: (product.sizes || []).map((variant) => ({
+        id: variant.id,
+        size: variant.size || '',
+        inventoryCount: Number(variant.inventoryCount ?? variant.inventory_count ?? (variant.inStock ? 1 : 0)),
+      })),
+    });
+  };
+
+  const closeEditor = () => {
+    if (!editorSaving) {
+      setEditingProduct(null);
+      setEditorForm(null);
+    }
+  };
+
+  const updateEditorSize = (index, key, value) => {
+    setEditorForm((current) => ({
+      ...current,
+      sizes: current.sizes.map((variant, variantIndex) => variantIndex === index
+        ? { ...variant, [key]: key === 'inventoryCount' ? Math.max(0, Number(value) || 0) : value }
+        : variant),
+    }));
+  };
+
+  const addEditorSize = () => {
+    setEditorForm((current) => ({ ...current, sizes: [...current.sizes, { size: '', inventoryCount: 0 }] }));
+  };
+
+  const removeEditorSize = (index) => {
+    setEditorForm((current) => ({ ...current, sizes: current.sizes.filter((_, variantIndex) => variantIndex !== index) }));
+  };
+
+  const handleSaveEditor = async (event) => {
+    event.preventDefault();
+    if (!editingProduct || !editorForm || editorSaving) return;
+    if (!editorForm.title.trim()) {
+      setNotice('Product title is required.');
+      return;
+    }
+    if (editorForm.status === 'PUBLISHED' && editorForm.source1688Status !== 'MATCHED') {
+      setNotice('Chỉ listing MATCHED trên 1688 mới được publish.');
+      return;
+    }
+    const nextProduct = {
+      ...editingProduct,
+      ...editorForm,
+      price: editorForm.price.startsWith('$') ? editorForm.price : `$${editorForm.price}`,
+      sizes: editorForm.sizes.filter((variant) => variant.size.trim()).map((variant) => ({
+        ...variant,
+        inStock: Number(variant.inventoryCount) > 0,
+      })),
+      source1688Status: editorForm.source1688Status,
+      source1688Url: editorForm.source1688Url,
+      source1688Title: editorForm.source1688Title,
+      source1688ImageUrl: editorForm.source1688ImageUrl,
+      source1688Score: editorForm.source1688Score,
+      source1688Note: editorForm.source1688Note,
+      images: [editorForm.thumbnail, editorForm.secondaryImage].filter(Boolean),
+      is_active: editorForm.status === 'PUBLISHED' && editorForm.source1688Status === 'MATCHED',
+    };
+    try {
+      validateProduct(nextProduct);
+    } catch (error) {
+      setNotice(error.message);
+      return;
+    }
+    setEditorSaving(true);
+    try {
+      const saved = await onSaveProduct?.(nextProduct) || nextProduct;
+      onSaveProducts?.([saved, ...products.filter((product) => product.id !== saved.id)]);
+      setRemoteRows((rows) => rows ? rows.map((product) => product.id === saved.id ? saved : product) : rows);
+      setEditingProduct(null);
+      setEditorForm(null);
+      setNotice(`Đã lưu ${saved.title}.`);
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      setNotice(`Không lưu được sản phẩm: ${error.message}`);
+    } finally {
+      setEditorSaving(false);
+    }
+    setTimeout(() => setNotice(''), 4500);
   };
 
   return (
@@ -304,6 +425,30 @@ export default function AdminProducts({
           <span>{notice}</span>
         </div>
       )}
+
+      {/* The catalog is a source-verification queue first, and a product list second. */}
+      <section className="admin-kpi-grid admin-product-kpis" aria-label="Catalog summary">
+        <button type="button" className="admin-kpi-card admin-kpi-button is-neutral" onClick={() => { setSelectedSourceStatus('ALL'); setSelectedStatus('ALL'); }}>
+          <span className="admin-kpi-label"><Boxes size={13} /> Catalog rows</span>
+          <strong className="admin-kpi-value">{productMetrics.total.toLocaleString()}</strong>
+          <span className="admin-kpi-note">All hat records in Supabase</span>
+        </button>
+        <button type="button" className="admin-kpi-card admin-kpi-button is-success" onClick={() => { setSelectedSourceStatus('MATCHED'); setSelectedStatus('PUBLISHED'); }}>
+          <span className="admin-kpi-label"><ShieldCheck size={13} /> Sellable now</span>
+          <strong className="admin-kpi-value">{productMetrics.sellable.toLocaleString()}</strong>
+          <span className="admin-kpi-note">MATCHED + published</span>
+        </button>
+        <button type="button" className="admin-kpi-card admin-kpi-button is-warning" onClick={() => { setSelectedSourceStatus('REVIEW'); setSelectedStatus('ALL'); }}>
+          <span className="admin-kpi-label"><CircleAlert size={13} /> Source queue</span>
+          <strong className="admin-kpi-value">{productMetrics.sourceQueue.toLocaleString()}</strong>
+          <span className="admin-kpi-note">Needs 1688 evidence before sale</span>
+        </button>
+        <button type="button" className="admin-kpi-card admin-kpi-button is-danger" onClick={() => { setSelectedStatus('ALL'); setSelectedSourceStatus('ALL'); }}>
+          <span className="admin-kpi-label"><Warehouse size={13} /> Low stock</span>
+          <strong className="admin-kpi-value">{productMetrics.lowStock.toLocaleString()}</strong>
+          <span className="admin-kpi-note">On the currently loaded page</span>
+        </button>
+      </section>
 
       {/* Toolbar / Search & Filter Controls */}
       <div className="bg-[#121212] border border-[#242424] rounded-xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
@@ -387,7 +532,7 @@ export default function AdminProducts({
             </thead>
             <tbody>
               {displayedProducts.map((p) => {
-                const inStockSizesCount = p.sizes?.filter(s => s.inStock).length || 0;
+                const inStockSizesCount = p.sizes?.filter((s) => s.inStock || Number(s.inventoryCount ?? s.inventory_count) > 0).length || 0;
                 return (
                   <tr key={p.id}>
                     {/* Item Thumbnail & Title */}
@@ -466,6 +611,13 @@ export default function AdminProducts({
                     <td className="text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
+                          onClick={() => openEditor(p)}
+                          className="p-1.5 text-white bg-[#2a2116] hover:bg-[#ff3b30] rounded transition-colors"
+                          title="Edit product and inventory"
+                        >
+                          <Edit3 size={13} />
+                        </button>
+                        <button
                           onClick={() => open1688Search(p)}
                           className="p-1.5 text-amber-300 hover:text-white bg-amber-950/40 hover:bg-amber-900/60 rounded transition-colors"
                           title="Tìm ảnh sản phẩm trên 1688"
@@ -517,6 +669,35 @@ export default function AdminProducts({
             <button disabled={catalogPage <= 1 || remoteLoading} onClick={() => setCatalogPage((current) => Math.max(1, current - 1))} className="flex items-center gap-1 rounded border border-[#333] px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-40"><ChevronLeft size={14} /> Previous</button>
             <button disabled={catalogPage >= remotePages || remoteLoading} onClick={() => setCatalogPage((current) => Math.min(remotePages, current + 1))} className="flex items-center gap-1 rounded border border-[#333] px-3 py-2 text-xs font-bold text-gray-300 disabled:opacity-40">Next <ChevronRight size={14} /></button>
           </div>
+        </div>
+      )}
+
+      {editingProduct && editorForm && (
+        <div className="admin-drawer-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeEditor(); }}>
+          <aside className="admin-drawer admin-product-drawer" role="dialog" aria-modal="true" aria-labelledby="product-editor-title">
+            <header className="admin-drawer-header">
+              <div>
+                <span className="admin-intro-eyebrow">CATALOG RECORD / {editingProduct.id}</span>
+                <h2 id="product-editor-title">Edit drop listing</h2>
+                <p>Giữ source gate của 1688 và tồn kho theo từng size.</p>
+              </div>
+              <button type="button" className="admin-icon-button" onClick={closeEditor} aria-label="Close editor"><X size={18} /></button>
+            </header>
+            <form className="admin-drawer-body admin-product-editor" onSubmit={handleSaveEditor}>
+              <div className="admin-editor-hero">
+                <img src={editorForm.thumbnail || undefined} alt="" />
+                <div><strong>{editorForm.title || 'Untitled listing'}</strong><span>{editingProduct.handle || `product-${editingProduct.id}`}</span><button type="button" className="admin-text-action" onClick={() => setEditorForm({ ...editorForm, thumbnail: editorForm.thumbnail })}><RotateCcw size={13} /> Keep current media</button></div>
+              </div>
+
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3>Merchandising details</h3><span className="admin-section-count">Customer-facing</span></div><label className="admin-form-label">Product title<input required value={editorForm.title} onChange={(event) => setEditorForm({ ...editorForm, title: event.target.value })} className="admin-form-input" /></label><div className="admin-form-grid"><label className="admin-form-label">Team<input value={editorForm.team} onChange={(event) => setEditorForm({ ...editorForm, team: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label">League<select value={editorForm.league} onChange={(event) => setEditorForm({ ...editorForm, league: event.target.value })} className="admin-form-select">{leagues.filter((league) => league !== 'ALL').map((league) => <option value={league} key={league}>{league}</option>)}</select></label></div><div className="admin-form-grid"><label className="admin-form-label">Silhouette<input value={editorForm.silhouette} onChange={(event) => setEditorForm({ ...editorForm, silhouette: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label"><span><CircleDollarSign size={13} /> Price</span><input inputMode="decimal" value={editorForm.price} onChange={(event) => setEditorForm({ ...editorForm, price: event.target.value })} className="admin-form-input" /></label></div><label className="admin-form-label">Badge<input value={editorForm.badge} onChange={(event) => setEditorForm({ ...editorForm, badge: event.target.value })} className="admin-form-input" placeholder="HOT DROP / EXCLUSIVE" /></label><div className="admin-form-grid"><label className="admin-form-label">Primary image<input type="url" value={editorForm.thumbnail} onChange={(event) => setEditorForm({ ...editorForm, thumbnail: event.target.value })} className="admin-form-input font-mono" /></label><label className="admin-form-label">Secondary image<input type="url" value={editorForm.secondaryImage} onChange={(event) => setEditorForm({ ...editorForm, secondaryImage: event.target.value })} className="admin-form-input font-mono" /></label></div><label className="admin-form-label">Description<textarea value={editorForm.description} onChange={(event) => setEditorForm({ ...editorForm, description: event.target.value })} className="admin-form-input admin-form-textarea" rows={3} placeholder="Short merchandising story" /></label></section>
+
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Warehouse size={15} /> Inventory by size</h3><button type="button" className="admin-text-action" onClick={addEditorSize}><Plus size={13} /> Add size</button></div><p className="admin-form-help">Số lượng bằng 0 sẽ ẩn size khỏi lựa chọn mua. Không dùng checkbox “in stock” giả.</p><div className="admin-inventory-grid">{editorForm.sizes.map((variant, index) => <div className="admin-inventory-row" key={`${variant.id || 'new'}-${index}`}><input aria-label={`Size ${index + 1}`} value={variant.size} onChange={(event) => updateEditorSize(index, 'size', event.target.value)} className="admin-form-input" placeholder="7 1/4" /><input aria-label={`Inventory for size ${variant.size || index + 1}`} type="number" min="0" value={variant.inventoryCount} onChange={(event) => updateEditorSize(index, 'inventoryCount', event.target.value)} className="admin-form-input" /><button type="button" onClick={() => removeEditorSize(index)} aria-label={`Remove size ${variant.size || index + 1}`}><X size={13} /></button></div>)}{!editorForm.sizes.length && <div className="admin-inventory-empty">No sizes yet. Add the first fitted size.</div>}</div></section>
+
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3><ShieldCheck size={15} /> Publish & source gate</h3><span className="admin-section-count">Required for sale</span></div><div className="admin-source-gate-card"><div className="admin-source-gate-card__top"><label className="admin-form-label">Listing status<select value={editorForm.status} onChange={(event) => setEditorForm({ ...editorForm, status: event.target.value })} className="admin-form-select"><option value="DRAFT">Draft — hidden</option><option value="PUBLISHED" disabled={editorForm.source1688Status !== 'MATCHED'}>Published — storefront</option></select></label><label className="admin-form-label">1688 check<select value={editorForm.source1688Status} onChange={(event) => setEditorForm({ ...editorForm, source1688Status: event.target.value, status: event.target.value === 'MATCHED' ? editorForm.status : 'DRAFT' })} className="admin-form-select"><option value="PENDING">PENDING</option><option value="REVIEW">REVIEW</option><option value="MATCHED">MATCHED / sellable</option><option value="NOT_FOUND">NOT_FOUND</option></select></label></div>{editorForm.source1688Status !== 'MATCHED' && <div className="admin-source-gate-warning"><CircleAlert size={14} /> Listing này vẫn bị khóa bán cho tới khi có URL mẫu tương ứng trên 1688.</div>}<div className="admin-form-grid"><label className="admin-form-label">1688 listing URL<input type="url" value={editorForm.source1688Url} onChange={(event) => setEditorForm({ ...editorForm, source1688Url: event.target.value })} className="admin-form-input font-mono" placeholder="https://detail.1688.com/offer/..." /></label><label className="admin-form-label">Match score (0–100)<input type="number" min="0" max="100" step="0.01" value={editorForm.source1688Score} onChange={(event) => setEditorForm({ ...editorForm, source1688Score: event.target.value })} className="admin-form-input" placeholder="88" /></label></div><label className="admin-form-label">1688 listing title<input value={editorForm.source1688Title} onChange={(event) => setEditorForm({ ...editorForm, source1688Title: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label">1688 image URL<input type="url" value={editorForm.source1688ImageUrl} onChange={(event) => setEditorForm({ ...editorForm, source1688ImageUrl: event.target.value })} className="admin-form-input font-mono" /></label><label className="admin-form-label">Verification note<textarea value={editorForm.source1688Note} onChange={(event) => setEditorForm({ ...editorForm, source1688Note: event.target.value })} className="admin-form-input admin-form-textarea" rows={2} placeholder="Màu, logo, form mũ, nhà cung cấp…" /></label></div></section>
+
+              <div className="admin-editor-footer"><button type="button" className="btn-secondary text-xs px-4 py-2.5" onClick={closeEditor}>Cancel</button><button type="submit" className="btn-flame text-xs px-4 py-2.5" disabled={editorSaving}><Save size={14} /> {editorSaving ? 'Saving…' : 'Save product'}</button></div>
+            </form>
+          </aside>
         </div>
       )}
 
