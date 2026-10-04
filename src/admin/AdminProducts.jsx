@@ -452,9 +452,11 @@ export default function AdminProducts({
   const handleCreateProduct = async (e) => {
     e.preventDefault();
     const images = (formState.images || []).map((image) => String(image || '').trim()).filter(Boolean);
+    const variantIdBase = Date.now();
     const variants = (formState.variants || [])
-      .map((variant) => ({
+      .map((variant, index) => ({
         ...variant,
+        id: variant.id || `${variantIdBase}-v-${index}`,
         size: String(variant.size || '').trim(),
         price: variantPrice(variant.price, formState.price),
         inventoryCount: Math.max(0, Number(variant.inventoryCount) || 0),
