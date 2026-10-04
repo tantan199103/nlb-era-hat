@@ -12,13 +12,23 @@ function numberPrice(value) {
 }
 
 export function mapCatalogRow(row = {}) {
+  const variantDetails = row.metadata?.variant_details && typeof row.metadata.variant_details === 'object'
+    ? row.metadata.variant_details
+    : {};
+  const variantOrder = Array.isArray(row.metadata?.variant_order) ? row.metadata.variant_order : [];
   const variants = (row.product_variants || []).map(variant => ({
     id: variant.id,
     size: variant.size,
     price: `$${Number(variant.price ?? row.price ?? 0).toFixed(2)}`,
     inStock: Boolean(variant.in_stock) || Number(variant.inventory_count || 0) > 0,
     inventoryCount: Number(variant.inventory_count || 0),
+    ...(variantDetails[variant.id] || {}),
   }));
+  variants.sort((left, right) => {
+    const leftIndex = variantOrder.indexOf(left.id);
+    const rightIndex = variantOrder.indexOf(right.id);
+    return (leftIndex < 0 ? variantOrder.length : leftIndex) - (rightIndex < 0 ? variantOrder.length : rightIndex);
+  });
   const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
   return {
     ...row,

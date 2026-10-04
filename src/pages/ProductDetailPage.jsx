@@ -5,6 +5,7 @@ import {
   RotateCcw, Sparkles, Flame, Star, ChevronRight, Plus, Minus, ArrowLeft 
 } from 'lucide-react';
 import { formatPrice } from '../utils/currency';
+import { selectedProductPrice } from '../lib/productPricing';
 
 export default function ProductDetailPage({ 
   product, 
@@ -46,6 +47,7 @@ export default function ProductDetailPage({
   if (!product) return null;
 
   const images = product.images && product.images.length > 0 ? product.images : [product.thumbnail];
+  const displayPrice = selectedProductPrice(product, selectedSize);
 
   // Complementary pin recommendation
   const complementaryPin = allProducts.find(p => p.category === 'pins') || allProducts[allProducts.length - 1];
@@ -180,7 +182,7 @@ export default function ProductDetailPage({
             {/* Price & Access Pass points */}
             <div className="flex items-baseline gap-3 mb-2">
               <span className="font-display text-3xl font-black text-white">
-                {formatPrice(product.price, currency)}
+                {formatPrice(displayPrice, currency)}
               </span>
               <span className="text-xs text-gray-400 font-semibold uppercase">{currency}</span>
               <span className="text-xs bg-[#1f2d22] text-[#3ed660] border border-[#2e5236] px-2.5 py-0.5 rounded font-bold">
@@ -301,7 +303,7 @@ export default function ProductDetailPage({
                 ) : (
                   <>
                     <ShoppingBag size={16} />
-                    <span>ADD TO CART • {formatPrice(product.price, currency)}</span>
+                    <span>ADD TO CART • {formatPrice(displayPrice, currency)}</span>
                   </>
                 )}
               </button>
@@ -492,7 +494,7 @@ export default function ProductDetailPage({
             <div className="hidden sm:block">
               <div className="text-xs font-bold text-white truncate max-w-[300px]">{product.title}</div>
               <div className="text-[11px] text-[#ffaa00] font-bold">
-                {selectedSize ? `Size: ${selectedSize}` : 'Pick a size'} • {formatPrice(product.price, currency)}
+                {selectedSize ? `Size: ${selectedSize}` : 'Pick a size'} • {formatPrice(displayPrice, currency)}
               </div>
             </div>
           </div>
@@ -502,7 +504,7 @@ export default function ProductDetailPage({
               onClick={handleAddToCart}
               className="btn-flame text-xs py-2.5 px-6 whitespace-nowrap"
             >
-              {isAdded ? 'ADDED!' : `ADD TO CART • ${formatPrice(product.price, currency)}`}
+              {isAdded ? 'ADDED!' : `ADD TO CART • ${formatPrice(displayPrice, currency)}`}
             </button>
           </div>
         </div>

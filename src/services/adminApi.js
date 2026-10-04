@@ -240,7 +240,7 @@ function variantRows(productId, product = {}) {
   const variants = Array.isArray(product.sizes) ? product.sizes : [];
   return variants
     .map((variant, index) => {
-      const size = String(variant.size || '').trim();
+      const size = String(variant.size || (Array.isArray(variant.values) ? variant.values.join(' / ') : '')).trim();
       if (!size) return null;
       const inventoryCount = Number(variant.inventoryCount ?? variant.inventory_count ?? (variant.inStock || variant.in_stock ? 1 : 0)) || 0;
       return {

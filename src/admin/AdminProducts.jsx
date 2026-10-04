@@ -30,6 +30,32 @@ function createVariant(size = '', price = '', inventoryCount = 0) {
   return { id: undefined, size, price: variantPrice(price), inventoryCount: Math.max(0, Number(inventoryCount) || 0) };
 }
 
+function optionValues(value) {
+  const seen = new Set();
+  return String(value || '').split(/[,\n]/).map((item) => item.trim()).filter((item) => {
+    const key = item.toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function variantCombinations(options, current = [], basePrice = '') {
+  const lists = options.map((option) => optionValues(option.values));
+  if (!lists.length || lists.some((list) => !list.length)) return current;
+  const combinations = lists.reduce((rows, list) => rows.flatMap((row) => list.map((value) => [...row, value])), [[]]);
+  const existing = new Map(current.map((variant) => [String(variant.size || '').toLowerCase(), variant]));
+  return combinations.map((values) => {
+    const size = values.join(' / ');
+    const found = existing.get(size.toLowerCase());
+    return found || createVariant(size, basePrice, 0);
+  });
+}
+
+function defaultVariantOptions() {
+  return [{ name: 'Size', values: DEFAULT_HAT_SIZES.join(', ') }];
+}
+
 export default function AdminProducts({ 
   products, 
   onSaveProducts, 
@@ -54,6 +80,7 @@ export default function AdminProducts({
   const [editorSaving, setEditorSaving] = useState(false);
   const [bulkVariantPrice, setBulkVariantPrice] = useState('');
   const [bulkVariantInventory, setBulkVariantInventory] = useState('');
+  const [selectedEditorVariantKeys, setSelectedEditorVariantKeys] = useState(() => new Set());
   const [verificationProduct, setVerificationProduct] = useState(null);
   const [verificationForm, setVerificationForm] = useState({
     status: 'MATCHED',
@@ -89,10 +116,7 @@ export default function AdminProducts({
     price: '$49.99',
     compareAtPrice: '',
     badge: 'HOT DROP',
-    images: [
-      'https://www.lidshd.com/cdn/shop/files/23235120_04.png?v=1790339447&width=2048',
-      'https://www.lidshd.com/cdn/shop/files/23235120_03.png?v=1790339447&width=2048',
-    ],
+    images: [],
     imageInput: '',
     imageAlt: '',
     description: '',
@@ -102,12 +126,14 @@ export default function AdminProducts({
     seoTitle: '',
     seoDescription: '',
     noindex: false,
-    variants: DEFAULT_HAT_SIZES.map((size) => createVariant(size, '$49.99', size === '7 5/8' ? 0 : 1)),
+    variants: [],
+    options: defaultVariantOptions(),
     category: 'hats',
     status: 'PUBLISHED'
   });
   const [newBulkVariantPrice, setNewBulkVariantPrice] = useState('');
   const [newBulkVariantInventory, setNewBulkVariantInventory] = useState('');
+  const [selectedCreateVariantKeys, setSelectedCreateVariantKeys] = useState(() => new Set());
 
   const facetValues = (key) => (Array.isArray(facets?.[key]) ? facets[key] : [])
     .map((item) => typeof item === 'string' ? item : item?.value)
@@ -280,10 +306,7 @@ export default function AdminProducts({
       price: '$49.99',
       compareAtPrice: '',
       badge: 'HOT DROP',
-      images: [
-        'https://www.lidshd.com/cdn/shop/files/23235133_04.png?v=1790339447&width=2048',
-        'https://www.lidshd.com/cdn/shop/files/23235133_03.png?v=1790339447&width=2048',
-      ],
+      images: [],
       imageInput: '',
       imageAlt: '',
       description: '',
@@ -293,12 +316,14 @@ export default function AdminProducts({
       seoTitle: '',
       seoDescription: '',
       noindex: false,
-      variants: DEFAULT_HAT_SIZES.map((size) => createVariant(size, '$49.99', size === '7 5/8' ? 0 : 1)),
+      variants: [],
+      options: defaultVariantOptions(),
       category: 'hats',
       status: 'DRAFT'
     });
     setNewBulkVariantPrice('');
     setNewBulkVariantInventory('');
+    setSelectedCreateVariantKeys(new Set());
     setIsNewModalOpen(true);
   };
 
@@ -329,18 +354,45 @@ export default function AdminProducts({
   const generateCreateSizes = () => {
     setFormState((current) => ({
       ...current,
-      variants: DEFAULT_HAT_SIZES.map((size) => {
-        const existing = current.variants.find((variant) => variant.size === size);
-        return existing || createVariant(size, current.price, 0);
-      }),
+      options: defaultVariantOptions(),
+      variants: variantCombinations(defaultVariantOptions(), current.variants, current.price),
     }));
+  };
+
+  const updateCreateOption = (index, key, value) => {
+    setFormState((current) => ({
+      ...current,
+      options: current.options.map((option, optionIndex) => optionIndex === index ? { ...option, [key]: value } : option),
+    }));
+  };
+
+  const addCreateOption = () => {
+    setFormState((current) => current.options.length >= 3 ? current : { ...current, options: [...current.options, { name: `Option ${current.options.length + 1}`, values: '' }] });
+  };
+
+  const removeCreateOption = (index) => {
+    setFormState((current) => current.options.length <= 1 ? current : { ...current, options: current.options.filter((_, optionIndex) => optionIndex !== index) });
+  };
+
+  const generateCreateVariants = () => {
+    try {
+      if (formState.options.some((option) => !String(option.name || '').trim() || !optionValues(option.values).length)) throw new Error('Nhập tên và ít nhất một giá trị cho từng option.');
+      const variants = variantCombinations(formState.options, formState.variants, formState.price);
+      if (variants.length > 300) throw new Error('Tối đa 300 biến thể cho mỗi sản phẩm.');
+      setFormState((current) => ({ ...current, variants }));
+      setSelectedCreateVariantKeys(new Set());
+      setNotice(`${variants.length} biến thể đã được tạo.`);
+      window.setTimeout(() => setNotice(''), 2500);
+    } catch (error) {
+      setNotice(error.message);
+    }
   };
 
   const applyCreateBulkVariantPrice = () => {
     if (newBulkVariantPrice === '') return;
     setFormState((current) => ({
       ...current,
-      variants: current.variants.map((variant) => ({ ...variant, price: variantPrice(newBulkVariantPrice) })),
+      variants: current.variants.map((variant, index) => (!selectedCreateVariantKeys.size || selectedCreateVariantKeys.has(String(variant.id || index)) ? { ...variant, price: variantPrice(newBulkVariantPrice) } : variant)),
     }));
   };
 
@@ -348,8 +400,20 @@ export default function AdminProducts({
     if (newBulkVariantInventory === '') return;
     setFormState((current) => ({
       ...current,
-      variants: current.variants.map((variant) => ({ ...variant, inventoryCount: Math.max(0, Number(newBulkVariantInventory) || 0) })),
+      variants: current.variants.map((variant, index) => (!selectedCreateVariantKeys.size || selectedCreateVariantKeys.has(String(variant.id || index)) ? { ...variant, inventoryCount: Math.max(0, Number(newBulkVariantInventory) || 0) } : variant)),
     }));
+  };
+
+  const toggleCreateVariant = (key, checked) => {
+    setSelectedCreateVariantKeys((current) => {
+      const next = new Set(current);
+      if (checked) next.add(String(key)); else next.delete(String(key));
+      return next;
+    });
+  };
+
+  const toggleAllCreateVariants = (checked) => {
+    setSelectedCreateVariantKeys(checked ? new Set(formState.variants.map((variant, index) => String(variant.id || index))) : new Set());
   };
 
   const addCreateImage = () => {
@@ -405,6 +469,10 @@ export default function AdminProducts({
       setNotice('Add at least one product image.');
       return;
     }
+    if (!variants.length) {
+      setNotice('Add at least one variant before saving.');
+      return;
+    }
     const newProduct = {
       id: Date.now(),
       title: formState.title,
@@ -437,6 +505,8 @@ export default function AdminProducts({
           fit: formState.fitNote,
           care: formState.care,
         },
+        variant_options: formState.options.map((option) => ({ name: option.name.trim(), values: optionValues(option.values) })),
+        variant_order: variants.map((variant) => variant.id).filter(Boolean),
         seo_title: formState.seoTitle || formState.title,
         seo_description: formState.seoDescription || formState.description,
         seo_noindex: Boolean(formState.noindex),
@@ -576,6 +646,7 @@ export default function AdminProducts({
     setEditingProduct(product);
     setBulkVariantPrice('');
     setBulkVariantInventory('');
+    setSelectedEditorVariantKeys(new Set());
     const metadata = product.metadata && typeof product.metadata === 'object' ? product.metadata : {};
     const seo = metadata.seo && typeof metadata.seo === 'object' ? metadata.seo : {};
     const content = metadata.content && typeof metadata.content === 'object' ? metadata.content : {};
@@ -583,6 +654,9 @@ export default function AdminProducts({
       ? product.images
       : [product.thumbnail, product.secondaryImage || product.secondary_image]
     ).filter(Boolean);
+    const savedOptions = Array.isArray(metadata.variant_options) && metadata.variant_options.length
+      ? metadata.variant_options.map((option) => ({ name: option.name || 'Option', values: Array.isArray(option.values) ? option.values.join(', ') : String(option.values || '') }))
+      : [{ name: 'Size', values: (product.sizes || []).map((variant) => variant.size).filter(Boolean).join(', ') }];
     setEditorForm({
       title: product.title || '',
       handle: product.handle || '',
@@ -619,6 +693,7 @@ export default function AdminProducts({
         price: String(variant.price || product.price || '').replace('$', ''),
         inventoryCount: Number(variant.inventoryCount ?? variant.inventory_count ?? (variant.inStock ? 1 : 0)),
       })),
+      options: savedOptions,
     });
   };
 
@@ -642,6 +717,35 @@ export default function AdminProducts({
     setEditorForm((current) => ({ ...current, sizes: [...current.sizes, { id: undefined, size: '', price: current.price, inventoryCount: 0 }] }));
   };
 
+  const updateEditorOption = (index, key, value) => {
+    setEditorForm((current) => ({
+      ...current,
+      options: current.options.map((option, optionIndex) => optionIndex === index ? { ...option, [key]: value } : option),
+    }));
+  };
+
+  const addEditorOption = () => {
+    setEditorForm((current) => current.options.length >= 3 ? current : { ...current, options: [...current.options, { name: `Option ${current.options.length + 1}`, values: '' }] });
+  };
+
+  const removeEditorOption = (index) => {
+    setEditorForm((current) => current.options.length <= 1 ? current : { ...current, options: current.options.filter((_, optionIndex) => optionIndex !== index) });
+  };
+
+  const generateEditorVariants = () => {
+    if (editorForm.options.some((option) => !String(option.name || '').trim() || !optionValues(option.values).length)) {
+      setNotice('Nhập tên và ít nhất một giá trị cho từng option.');
+      return;
+    }
+    const next = variantCombinations(editorForm.options, editorForm.sizes, editorForm.price);
+    if (next.length > 300) {
+      setNotice('Tối đa 300 biến thể cho mỗi sản phẩm.');
+      return;
+    }
+    setEditorForm((current) => ({ ...current, sizes: next }));
+    setSelectedEditorVariantKeys(new Set());
+  };
+
   const removeEditorSize = (index) => {
     setEditorForm((current) => ({ ...current, sizes: current.sizes.filter((_, variantIndex) => variantIndex !== index) }));
   };
@@ -650,7 +754,7 @@ export default function AdminProducts({
     if (!editorForm || bulkVariantPrice === '') return;
     setEditorForm((current) => ({
       ...current,
-      sizes: current.sizes.map((variant) => ({ ...variant, price: variantPrice(bulkVariantPrice) })),
+      sizes: current.sizes.map((variant, index) => (!selectedEditorVariantKeys.size || selectedEditorVariantKeys.has(String(variant.id || index)) ? { ...variant, price: variantPrice(bulkVariantPrice) } : variant)),
     }));
   };
 
@@ -658,8 +762,20 @@ export default function AdminProducts({
     if (!editorForm || bulkVariantInventory === '') return;
     setEditorForm((current) => ({
       ...current,
-      sizes: current.sizes.map((variant) => ({ ...variant, inventoryCount: Math.max(0, Number(bulkVariantInventory) || 0) })),
+      sizes: current.sizes.map((variant, index) => (!selectedEditorVariantKeys.size || selectedEditorVariantKeys.has(String(variant.id || index)) ? { ...variant, inventoryCount: Math.max(0, Number(bulkVariantInventory) || 0) } : variant)),
     }));
+  };
+
+  const toggleEditorVariant = (key, checked) => {
+    setSelectedEditorVariantKeys((current) => {
+      const next = new Set(current);
+      if (checked) next.add(String(key)); else next.delete(String(key));
+      return next;
+    });
+  };
+
+  const toggleAllEditorVariants = (checked) => {
+    setSelectedEditorVariantKeys(checked ? new Set(editorForm.sizes.map((variant, index) => String(variant.id || index))) : new Set());
   };
 
   const updateEditorImage = (index, value) => {
@@ -712,6 +828,9 @@ export default function AdminProducts({
           fit: editorForm.fitNote.trim(),
           care: editorForm.care.trim(),
         },
+        variant_options: editorForm.options.map((option) => ({ name: option.name.trim(), values: optionValues(option.values) })),
+        variant_order: editorForm.sizes.map((variant) => variant.id).filter(Boolean),
+        variant_details: Object.fromEntries(editorForm.sizes.filter((variant) => variant.id).map((variant) => [variant.id, { values: String(variant.size || '').split(' / '), sku: variant.sku || '' }])),
         seo_title: editorForm.seoTitle.trim(),
         seo_description: editorForm.seoDescription.trim(),
         seo_noindex: Boolean(editorForm.noindex),
@@ -719,6 +838,7 @@ export default function AdminProducts({
       price: editorForm.price.startsWith('$') ? editorForm.price : `$${editorForm.price}`,
       sizes: editorForm.sizes.filter((variant) => variant.size.trim()).map((variant) => ({
         ...variant,
+        values: String(variant.size || '').split(' / '),
         price: variantPrice(variant.price, editorForm.price),
         inStock: Number(variant.inventoryCount) > 0,
       })),
@@ -1127,7 +1247,7 @@ export default function AdminProducts({
 
               <section className="admin-detail-section"><div className="admin-section-heading"><h3>Catalog organization</h3><span className="admin-section-count">Shopify style</span></div><div className="admin-form-grid"><label className="admin-form-label">URL handle<input value={editorForm.handle} onChange={(event) => setEditorForm({ ...editorForm, handle: event.target.value })} className="admin-form-input font-mono" placeholder="new-era-yankees" /></label><label className="admin-form-label">Product group<input value={editorForm.productGroup} onChange={(event) => setEditorForm({ ...editorForm, productGroup: event.target.value })} className="admin-form-input" placeholder="Caps" /></label></div><div className="admin-form-grid"><label className="admin-form-label">Source SKU<input value={editorForm.sourceSku} onChange={(event) => setEditorForm({ ...editorForm, sourceSku: event.target.value })} className="admin-form-input font-mono" /></label><label className="admin-form-label">Brand<input value={editorForm.brand} onChange={(event) => setEditorForm({ ...editorForm, brand: event.target.value })} className="admin-form-input" placeholder="New Era" /></label></div><label className="admin-form-label">Tags<input value={editorForm.tags} onChange={(event) => setEditorForm({ ...editorForm, tags: event.target.value })} className="admin-form-input" placeholder="new-era, mlb, fitted" /><span className="admin-form-help">Separate tags with commas for search and collections.</span></label></section>
 
-              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Warehouse size={15} /> Variants & inventory</h3><button type="button" className="admin-text-action" onClick={addEditorSize}><Plus size={13} /> Add variant</button></div><p className="admin-form-help">Mỗi size có thể có giá và tồn kho riêng. Giá/tồn kho hàng loạt chỉ áp dụng trên bảng này và được lưu cùng sản phẩm.</p><div className="admin-variant-bulkbar"><label className="admin-form-label"><span><CircleDollarSign size={12} /> Apply price to all</span><input inputMode="decimal" value={bulkVariantPrice} onChange={(event) => setBulkVariantPrice(event.target.value)} className="admin-form-input" placeholder={editorForm.price || '49.99'} /></label><button type="button" className="admin-button" onClick={applyEditorBulkVariantPrice}>Apply price</button><label className="admin-form-label"><span><Warehouse size={12} /> Set stock for all</span><input type="number" min="0" value={bulkVariantInventory} onChange={(event) => setBulkVariantInventory(event.target.value)} className="admin-form-input" placeholder="0" /></label><button type="button" className="admin-button" onClick={applyEditorBulkVariantInventory}>Apply stock</button></div><div className="admin-variant-table"><div className="admin-variant-table__head"><span>Option / size</span><span>Price</span><span>Available</span><span aria-hidden="true" /></div>{editorForm.sizes.map((variant, index) => <div className="admin-variant-row" key={`${variant.id || 'new'}-${index}`}><input aria-label={`Size ${index + 1}`} value={variant.size} onChange={(event) => updateEditorSize(index, 'size', event.target.value)} className="admin-form-input" placeholder="7 1/4" /><div className="admin-price-input"><span>$</span><input aria-label={`Price for ${variant.size || index + 1}`} inputMode="decimal" value={variant.price} onChange={(event) => updateEditorSize(index, 'price', event.target.value)} className="admin-form-input" /></div><input aria-label={`Inventory for size ${variant.size || index + 1}`} type="number" min="0" value={variant.inventoryCount} onChange={(event) => updateEditorSize(index, 'inventoryCount', event.target.value)} className="admin-form-input" /><button type="button" onClick={() => removeEditorSize(index)} aria-label={`Remove variant ${variant.size || index + 1}`}><X size={13} /></button></div>)}{!editorForm.sizes.length && <div className="admin-inventory-empty">No variants yet. Add the first fitted size.</div>}</div></section>
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Warehouse size={15} /> Variants & inventory</h3><div className="admin-section-heading__actions"><button type="button" className="admin-text-action" onClick={generateEditorVariants}><RotateCcw size={12} /> Generate combinations</button><button type="button" className="admin-text-action" onClick={addEditorOption}><Plus size={13} /> Add option</button><button type="button" className="admin-text-action" onClick={addEditorSize}><Plus size={13} /> Add variant</button></div></div><p className="admin-form-help">Tạo tổ hợp Size / Color / Style rồi chỉnh giá và tồn kho ngay trên bảng. Chọn dòng để áp dụng nhanh giá hoặc tồn kho.</p><div className="admin-option-builder">{editorForm.options.map((option, index) => <div className="admin-option-row" key={`${option.name}-${index}`}><label className="admin-form-label">Option name<input value={option.name} onChange={(event) => updateEditorOption(index, 'name', event.target.value)} className="admin-form-input" placeholder="Size" /></label><label className="admin-form-label">Values (comma separated)<input value={option.values} onChange={(event) => updateEditorOption(index, 'values', event.target.value)} className="admin-form-input" placeholder="7, 7 1/8, 7 1/4" /></label>{editorForm.options.length > 1 && <button type="button" onClick={() => removeEditorOption(index)} aria-label={`Remove option ${index + 1}`}><X size={13} /></button>}</div>)}</div><div className="admin-variant-bulkbar"><label className="admin-form-label"><span><CircleDollarSign size={12} /> Apply price {selectedEditorVariantKeys.size ? `to ${selectedEditorVariantKeys.size}` : 'to all'}</span><input inputMode="decimal" value={bulkVariantPrice} onChange={(event) => setBulkVariantPrice(event.target.value)} className="admin-form-input" placeholder={editorForm.price || '49.99'} /></label><button type="button" className="admin-button" onClick={applyEditorBulkVariantPrice}>Apply price</button><label className="admin-form-label"><span><Warehouse size={12} /> Set stock {selectedEditorVariantKeys.size ? `for ${selectedEditorVariantKeys.size}` : 'for all'}</span><input type="number" min="0" value={bulkVariantInventory} onChange={(event) => setBulkVariantInventory(event.target.value)} className="admin-form-input" placeholder="0" /></label><button type="button" className="admin-button" onClick={applyEditorBulkVariantInventory}>Apply stock</button></div><div className="admin-variant-table"><div className="admin-variant-table__head"><span><input type="checkbox" checked={editorForm.sizes.length > 0 && selectedEditorVariantKeys.size === editorForm.sizes.length} onChange={(event) => toggleAllEditorVariants(event.target.checked)} aria-label="Select all editor variants" /> Option / size</span><span>Price</span><span>Available</span><span aria-hidden="true" /></div>{editorForm.sizes.map((variant, index) => <div className="admin-variant-row" key={`${variant.id || 'new'}-${index}`}><input type="checkbox" checked={selectedEditorVariantKeys.has(String(variant.id || index))} onChange={(event) => toggleEditorVariant(variant.id || index, event.target.checked)} aria-label={`Select variant ${variant.size || index + 1}`} /><input aria-label={`Size ${index + 1}`} value={variant.size} onChange={(event) => updateEditorSize(index, 'size', event.target.value)} className="admin-form-input" placeholder="7 1/4 / Black" /><div className="admin-price-input"><span>$</span><input aria-label={`Price for ${variant.size || index + 1}`} inputMode="decimal" value={variant.price} onChange={(event) => updateEditorSize(index, 'price', event.target.value)} className="admin-form-input" /></div><input aria-label={`Inventory for size ${variant.size || index + 1}`} type="number" min="0" value={variant.inventoryCount} onChange={(event) => updateEditorSize(index, 'inventoryCount', event.target.value)} className="admin-form-input" /><button type="button" onClick={() => removeEditorSize(index)} aria-label={`Remove variant ${variant.size || index + 1}`}><X size={13} /></button></div>)}{!editorForm.sizes.length && <div className="admin-inventory-empty">No variants yet. Add a size or generate combinations.</div>}</div></section>
 
               <section className="admin-detail-section"><div className="admin-section-heading"><h3>Search preview</h3><span className="admin-section-count">SEO content</span></div><label className="admin-form-label">SEO title<input maxLength="60" value={editorForm.seoTitle} onChange={(event) => setEditorForm({ ...editorForm, seoTitle: event.target.value })} className="admin-form-input" placeholder="New Era Yankees 59FIFTY | NLB ERA HAT" /></label><label className="admin-form-label">SEO description<textarea maxLength="160" rows={3} value={editorForm.seoDescription} onChange={(event) => setEditorForm({ ...editorForm, seoDescription: event.target.value })} className="admin-form-input admin-form-textarea" placeholder="Describe the hat, fit and drop story in one clear sentence." /></label><label className="flex items-center gap-2 text-xs text-zinc-300"><input type="checkbox" checked={editorForm.noindex} onChange={(event) => setEditorForm({ ...editorForm, noindex: event.target.checked })} className="h-4 w-4 accent-[#ff3b30]" /> Hide this listing from search engines</label></section>
 
@@ -1229,7 +1349,7 @@ export default function AdminProducts({
 
               <section className="admin-detail-section"><div className="admin-section-heading"><h3><CircleDollarSign size={15} /> Pricing</h3><span className="admin-section-count">Base & compare-at</span></div><div className="admin-form-grid"><label className="admin-form-label"><span><CircleDollarSign size={12} /> Base price</span><input required inputMode="decimal" value={formState.price} onChange={(event) => updateCreateField('price', event.target.value)} className="admin-form-input" placeholder="49.99" /></label><label className="admin-form-label">Compare-at price<input inputMode="decimal" value={formState.compareAtPrice} onChange={(event) => updateCreateField('compareAtPrice', event.target.value)} className="admin-form-input" placeholder="Optional sale reference" /></label></div><label className="admin-form-label">Badge<input value={formState.badge} onChange={(event) => updateCreateField('badge', event.target.value)} className="admin-form-input" placeholder="HOT DROP / EXCLUSIVE" /></label><p className="admin-form-help">Base price is the fallback. Each variant below can override it with its own price.</p></section>
 
-              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Warehouse size={15} /> Variants</h3><div className="admin-section-heading__actions"><button type="button" className="admin-text-action" onClick={generateCreateSizes}><RotateCcw size={12} /> Generate fitted sizes</button><button type="button" className="admin-text-action" onClick={() => addCreateVariant()}><Plus size={13} /> Add variant</button></div></div><p className="admin-form-help">Tạo bao nhiêu size tuỳ ý. Giá và tồn kho được lưu riêng cho từng dòng, nên bạn có thể bán size hiếm với giá khác.</p><div className="admin-variant-bulkbar"><label className="admin-form-label"><span><CircleDollarSign size={12} /> Apply price to all</span><input inputMode="decimal" value={newBulkVariantPrice} onChange={(event) => setNewBulkVariantPrice(event.target.value)} className="admin-form-input" placeholder={formState.price || '49.99'} /></label><button type="button" className="admin-button" onClick={applyCreateBulkVariantPrice}>Apply price</button><label className="admin-form-label"><span><Warehouse size={12} /> Set stock for all</span><input type="number" min="0" value={newBulkVariantInventory} onChange={(event) => setNewBulkVariantInventory(event.target.value)} className="admin-form-input" placeholder="0" /></label><button type="button" className="admin-button" onClick={applyCreateBulkVariantInventory}>Apply stock</button></div><div className="admin-variant-table"><div className="admin-variant-table__head"><span>Option / size</span><span>Price</span><span>Available</span><span aria-hidden="true" /></div>{formState.variants.map((variant, index) => <div className="admin-variant-row" key={`${variant.id || 'new'}-${index}`}><input aria-label={`Variant ${index + 1} size`} value={variant.size} onChange={(event) => updateCreateVariant(index, 'size', event.target.value)} className="admin-form-input" placeholder="7 1/4" /><div className="admin-price-input"><span>$</span><input aria-label={`Variant ${index + 1} price`} inputMode="decimal" value={variant.price} onChange={(event) => updateCreateVariant(index, 'price', event.target.value)} className="admin-form-input" /></div><input aria-label={`Variant ${index + 1} inventory`} type="number" min="0" value={variant.inventoryCount} onChange={(event) => updateCreateVariant(index, 'inventoryCount', event.target.value)} className="admin-form-input" /><button type="button" onClick={() => removeCreateVariant(index)} aria-label={`Remove variant ${index + 1}`}><X size={13} /></button></div>)}{!formState.variants.length && <div className="admin-inventory-empty">No variants yet. Add a size or generate fitted sizes.</div>}</div></section>
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Warehouse size={15} /> Variants</h3><div className="admin-section-heading__actions"><button type="button" className="admin-text-action" onClick={generateCreateSizes}><RotateCcw size={12} /> Use fitted sizes</button><button type="button" className="admin-text-action" onClick={addCreateOption}><Plus size={13} /> Add option</button><button type="button" className="admin-text-action" onClick={generateCreateVariants}><RotateCcw size={12} /> Generate combinations</button><button type="button" className="admin-text-action" onClick={() => addCreateVariant()}><Plus size={13} /> Add variant</button></div></div><p className="admin-form-help">Tạo Size / Color / Style rồi sinh tổ hợp. Mỗi dòng có giá và tồn kho riêng; chọn dòng để chỉnh nhanh theo nhóm.</p><div className="admin-option-builder">{formState.options.map((option, index) => <div className="admin-option-row" key={`${option.name}-${index}`}><label className="admin-form-label">Option name<input value={option.name} onChange={(event) => updateCreateOption(index, 'name', event.target.value)} className="admin-form-input" placeholder="Size" /></label><label className="admin-form-label">Values (comma separated)<input value={option.values} onChange={(event) => updateCreateOption(index, 'values', event.target.value)} className="admin-form-input" placeholder="7, 7 1/8, 7 1/4" /></label>{formState.options.length > 1 && <button type="button" onClick={() => removeCreateOption(index)} aria-label={`Remove option ${index + 1}`}><X size={13} /></button>}</div>)}</div><div className="admin-variant-bulkbar"><label className="admin-form-label"><span><CircleDollarSign size={12} /> Apply price {selectedCreateVariantKeys.size ? `to ${selectedCreateVariantKeys.size}` : 'to all'}</span><input inputMode="decimal" value={newBulkVariantPrice} onChange={(event) => setNewBulkVariantPrice(event.target.value)} className="admin-form-input" placeholder={formState.price || '49.99'} /></label><button type="button" className="admin-button" onClick={applyCreateBulkVariantPrice}>Apply price</button><label className="admin-form-label"><span><Warehouse size={12} /> Set stock {selectedCreateVariantKeys.size ? `for ${selectedCreateVariantKeys.size}` : 'for all'}</span><input type="number" min="0" value={newBulkVariantInventory} onChange={(event) => setNewBulkVariantInventory(event.target.value)} className="admin-form-input" placeholder="0" /></label><button type="button" className="admin-button" onClick={applyCreateBulkVariantInventory}>Apply stock</button></div><div className="admin-variant-table"><div className="admin-variant-table__head"><span><input type="checkbox" checked={formState.variants.length > 0 && selectedCreateVariantKeys.size === formState.variants.length} onChange={(event) => toggleAllCreateVariants(event.target.checked)} aria-label="Select all new variants" /> Option / size</span><span>Price</span><span>Available</span><span aria-hidden="true" /></div>{formState.variants.map((variant, index) => <div className="admin-variant-row" key={`${variant.id || 'new'}-${index}`}><input type="checkbox" checked={selectedCreateVariantKeys.has(String(variant.id || index))} onChange={(event) => toggleCreateVariant(variant.id || index, event.target.checked)} aria-label={`Select variant ${index + 1}`} /><input aria-label={`Variant ${index + 1} size`} value={variant.size} onChange={(event) => updateCreateVariant(index, 'size', event.target.value)} className="admin-form-input" placeholder="7 1/4 / Black" /><div className="admin-price-input"><span>$</span><input aria-label={`Variant ${index + 1} price`} inputMode="decimal" value={variant.price} onChange={(event) => updateCreateVariant(index, 'price', event.target.value)} className="admin-form-input" /></div><input aria-label={`Variant ${index + 1} inventory`} type="number" min="0" value={variant.inventoryCount} onChange={(event) => updateCreateVariant(index, 'inventoryCount', event.target.value)} className="admin-form-input" /><button type="button" onClick={() => removeCreateVariant(index)} aria-label={`Remove variant ${index + 1}`}><X size={13} /></button></div>)}{!formState.variants.length && <div className="admin-inventory-empty">No variants yet. Add an option or create a one-size variant.</div>}</div></section>
 
               <section className="admin-detail-section"><div className="admin-section-heading"><h3>Search preview</h3><span className="admin-section-count">SEO content</span></div><label className="admin-form-label">SEO title<input maxLength="60" value={formState.seoTitle} onChange={(event) => updateCreateField('seoTitle', event.target.value)} className="admin-form-input" placeholder="New Era Yankees 59FIFTY | NLB ERA HAT" /></label><label className="admin-form-label">SEO description<textarea maxLength="160" rows={3} value={formState.seoDescription} onChange={(event) => updateCreateField('seoDescription', event.target.value)} className="admin-form-input admin-form-textarea" placeholder="Describe the hat, fit and drop story in one clear sentence." /></label><label className="flex items-center gap-2 text-xs text-zinc-300"><input type="checkbox" checked={formState.noindex} onChange={(event) => updateCreateField('noindex', event.target.checked)} className="h-4 w-4 accent-[#ff3b30]" /> Hide this listing from search engines</label></section>
 

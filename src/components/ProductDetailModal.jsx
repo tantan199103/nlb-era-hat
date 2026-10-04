@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Check, ShoppingBag, ShieldCheck, Ruler, Truck, Flame, Sparkles } from 'lucide-react';
 import { formatPrice } from '../utils/currency';
+import { selectedProductPrice } from '../lib/productPricing';
 
 export default function ProductDetailModal({ product, isOpen, onClose, onAddToCart, currency = 'USD' }) {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
@@ -12,6 +13,7 @@ export default function ProductDetailModal({ product, isOpen, onClose, onAddToCa
   if (!isOpen || !product) return null;
 
   const images = product.images && product.images.length > 0 ? product.images : [product.thumbnail];
+  const displayPrice = selectedProductPrice(product, selectedSize);
 
   const handleSizeClick = (s) => {
     if (!s.inStock) return;
@@ -113,7 +115,7 @@ export default function ProductDetailModal({ product, isOpen, onClose, onAddToCa
             {/* Price */}
             <div className="flex items-baseline gap-3 mb-4">
               <span className="font-display text-3xl font-black text-white">
-                {formatPrice(product.price, currency)}
+                {formatPrice(displayPrice, currency)}
               </span>
               <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider">{currency}</span>
               <span className="text-xs bg-[#242424] text-[#3ed660] font-bold px-2 py-0.5 rounded border border-[#333]">
@@ -220,7 +222,7 @@ export default function ProductDetailModal({ product, isOpen, onClose, onAddToCa
               ) : (
                 <>
                   <ShoppingBag size={16} />
-                  <span>ADD TO CART • {formatPrice(product.price, currency)}</span>
+                  <span>ADD TO CART • {formatPrice(displayPrice, currency)}</span>
                 </>
               )}
             </button>

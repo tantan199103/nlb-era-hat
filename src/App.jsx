@@ -30,6 +30,7 @@ import AdminShell from './admin/AdminShell';
 
 import { products } from './data/storeData';
 import { supabase } from './lib/supabase';
+import { selectedProductPrice } from './lib/productPricing';
 import { 
   defaultMenus, 
   defaultCollections, 
@@ -499,7 +500,7 @@ export default function App() {
         (item) => item.id === product.id && item.size === size
       );
 
-      if (existingIndex > -1) {
+    if (existingIndex > -1) {
         const next = [...prev];
         next[existingIndex].quantity += 1;
         return next;
@@ -509,7 +510,7 @@ export default function App() {
           {
             id: product.id,
             title: product.title,
-            price: product.price,
+            price: selectedProductPrice(product, size),
             size: size,
             thumbnail: product.thumbnail,
             quantity: 1,

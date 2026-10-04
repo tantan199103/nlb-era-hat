@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ShoppingBag, Check, Eye, AlertCircle, Heart } from 'lucide-react';
 import { formatPrice } from '../utils/currency';
+import { selectedProductPrice } from '../lib/productPricing';
 
 export default function ProductCard({ 
   product, 
@@ -57,6 +58,7 @@ export default function ProductCard({
   const displayImage = isHovered && product.secondaryImage 
     ? product.secondaryImage 
     : product.thumbnail;
+  const displayPrice = selectedProductPrice(product, selectedSize);
 
   return (
     <div className="product-card group bg-[#141414] border border-[#222222] hover:border-[#383838] transition-all duration-300 rounded-md overflow-hidden flex flex-col justify-between">
@@ -149,7 +151,7 @@ export default function ProductCard({
 
           <div className="flex items-baseline gap-2 mb-3">
             <span className="font-display text-lg font-black text-white tracking-wider">
-              {formatPrice(product.price, currency)}
+              {formatPrice(displayPrice, currency)}
             </span>
             <span className="text-[11px] text-gray-500 font-medium">{currency}</span>
           </div>
@@ -218,7 +220,7 @@ export default function ProductCard({
             ) : (
               <>
                 <ShoppingBag size={14} />
-                <span>ADD TO CART • {formatPrice(product.price, currency)}</span>
+                <span>ADD TO CART • {formatPrice(displayPrice, currency)}</span>
               </>
             )}
           </button>
