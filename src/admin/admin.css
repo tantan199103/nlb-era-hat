@@ -561,6 +561,10 @@
   overflow-y: auto;
 }
 
+/* Product editing follows a Shopify-style workspace: content, inventory,
+   source verification and search fields need room to stay readable together. */
+.admin-product-drawer { max-width: 820px; }
+
 /* Keyboard focus should remain visible against the dark control-room palette. */
 .admin-nav-item:focus-visible,
 .admin-store-link:focus-visible,

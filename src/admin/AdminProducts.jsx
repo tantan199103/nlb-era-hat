@@ -49,6 +49,8 @@ export default function AdminProducts({
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [selectedProductIds, setSelectedProductIds] = useState(() => new Set());
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   // Form state for creating / editing product
   const [formState, setFormState] = useState({
@@ -167,9 +169,58 @@ export default function AdminProducts({
 
   useEffect(() => { setCatalogPage(1); }, [query, selectedLeague, selectedGroup, selectedSilhouette, selectedStatus, selectedSourceStatus, inStockOnly]);
 
+  useEffect(() => {
+    setSelectedProductIds(new Set());
+  }, [query, selectedLeague, selectedGroup, selectedSilhouette, selectedStatus, selectedSourceStatus, inStockOnly, catalogPage]);
+
   const displayedProducts = remoteRows ?? filteredProducts;
   const displayedCount = remoteRows ? remoteCount : filteredProducts.length;
   const displayedTotal = remoteRows ? remoteCount : products.length;
+  const displayedProductIds = displayedProducts.map((product) => String(product.id));
+  const allDisplayedSelected = displayedProductIds.length > 0 && displayedProductIds.every((id) => selectedProductIds.has(id));
+
+  const toggleProductSelection = (productId, checked) => {
+    setSelectedProductIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(String(productId));
+      else next.delete(String(productId));
+      return next;
+    });
+  };
+
+  const toggleAllDisplayed = (checked) => {
+    setSelectedProductIds((current) => {
+      const next = new Set(current);
+      displayedProductIds.forEach((id) => checked ? next.add(id) : next.delete(id));
+      return next;
+    });
+  };
+
+  const handleBulkStatus = async (status) => {
+    const targets = displayedProducts.filter((product) => selectedProductIds.has(String(product.id)));
+    if (!targets.length || bulkSaving) return;
+    setBulkSaving(true);
+    const savedById = new Map();
+    let successCount = 0;
+    let failedCount = 0;
+    for (const product of targets) {
+      try {
+        const saved = await onToggleProductStatus?.(product, status);
+        if (saved) savedById.set(String(saved.id), saved);
+        successCount += 1;
+      } catch (error) {
+        failedCount += 1;
+      }
+    }
+    if (savedById.size) {
+      setRemoteRows((rows) => rows ? rows.map((row) => savedById.get(String(row.id)) || row) : rows);
+      setRefreshKey((value) => value + 1);
+    }
+    setSelectedProductIds(new Set());
+    setBulkSaving(false);
+    setNotice(`${successCount} listing${successCount === 1 ? '' : 's'} updated${failedCount ? `, ${failedCount} skipped by source gate` : ''}.`);
+    setTimeout(() => setNotice(''), 4500);
+  };
 
   // Actions
   const handleOpenAddModal = () => {
@@ -340,11 +391,18 @@ export default function AdminProducts({
 
   const openEditor = (product) => {
     setEditingProduct(product);
+    const metadata = product.metadata && typeof product.metadata === 'object' ? product.metadata : {};
+    const seo = metadata.seo && typeof metadata.seo === 'object' ? metadata.seo : {};
     setEditorForm({
       title: product.title || '',
+      handle: product.handle || '',
       team: product.team || '',
       league: product.league || 'MLB',
       silhouette: product.silhouette || '59FIFTY Fitted',
+      productGroup: product.productGroup || metadata.source_product_group || '',
+      sourceSku: product.sourceSku || metadata.source_sku || product.sku || '',
+      brand: metadata.brand || '',
+      tags: Array.isArray(product.tags) ? product.tags.join(', ') : '',
       price: String(product.price || '').replace('$', ''),
       badge: product.badge || '',
       thumbnail: product.thumbnail || '',
@@ -352,6 +410,9 @@ export default function AdminProducts({
       source1688ImageUrl: product.source1688ImageUrl || '',
       source1688Score: product.source1688Score == null ? '' : String(product.source1688Score),
       description: product.description || '',
+      seoTitle: metadata.seo_title || seo.title || '',
+      seoDescription: metadata.seo_description || seo.description || '',
+      noindex: Boolean(metadata.seo_noindex ?? seo.noindex),
       status: product.status || (product.is_active === false ? 'DRAFT' : 'PUBLISHED'),
       source1688Status: product.source1688Status || 'PENDING',
       source1688Url: product.source1688Url || '',
@@ -403,6 +464,15 @@ export default function AdminProducts({
     const nextProduct = {
       ...editingProduct,
       ...editorForm,
+      handle: editorForm.handle.trim(),
+      tags: editorForm.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+      metadata: {
+        ...(editingProduct.metadata || {}),
+        brand: editorForm.brand.trim(),
+        seo_title: editorForm.seoTitle.trim(),
+        seo_description: editorForm.seoDescription.trim(),
+        seo_noindex: Boolean(editorForm.noindex),
+      },
       price: editorForm.price.startsWith('$') ? editorForm.price : `$${editorForm.price}`,
       sizes: editorForm.sizes.filter((variant) => variant.size.trim()).map((variant) => ({
         ...variant,
@@ -611,10 +681,20 @@ export default function AdminProducts({
 
       {/* Product Table */}
       <div className="bg-[#121212] border border-[#242424] rounded-xl overflow-hidden shadow-xl">
+        {selectedProductIds.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-[#293629] bg-[#142016] px-4 py-2.5 text-xs text-[#b7d9bd]">
+            <strong>{selectedProductIds.size} selected</strong>
+            <span className="text-[#6f9276]">Bulk actions</span>
+            <button type="button" onClick={() => handleBulkStatus('PUBLISHED')} disabled={bulkSaving} className="rounded border border-[#3c6a45] px-2.5 py-1 font-bold text-[#9be5a5] hover:bg-[#1d3822] disabled:opacity-50">{bulkSaving ? 'Saving…' : 'Publish matched'}</button>
+            <button type="button" onClick={() => handleBulkStatus('DRAFT')} disabled={bulkSaving} className="rounded border border-[#444] px-2.5 py-1 font-bold text-zinc-300 hover:bg-[#252525] disabled:opacity-50">Set draft</button>
+            <button type="button" onClick={() => setSelectedProductIds(new Set())} className="ml-auto text-[10px] font-black uppercase tracking-wider text-zinc-500 hover:text-white">Clear selection</button>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="admin-table">
             <thead>
               <tr>
+                <th className="w-10"><input type="checkbox" checked={allDisplayedSelected} onChange={(event) => toggleAllDisplayed(event.target.checked)} aria-label="Select visible products" /></th>
                 <th>Cap / Item</th>
                 <th>Team & League</th>
                 <th>Silhouette</th>
@@ -626,12 +706,13 @@ export default function AdminProducts({
             </thead>
             <tbody>
               {displayedProducts.length === 0 && !remoteLoading && (
-                <tr><td colSpan="7" className="py-12 text-center text-sm text-gray-500">No catalog rows match these filters.</td></tr>
+                <tr><td colSpan="8" className="py-12 text-center text-sm text-gray-500">No catalog rows match these filters.</td></tr>
               )}
               {displayedProducts.map((p) => {
                 const inStockSizesCount = p.sizes?.filter((s) => s.inStock || Number(s.inventoryCount ?? s.inventory_count) > 0).length || 0;
                 return (
                   <tr key={p.id}>
+                    <td><input type="checkbox" checked={selectedProductIds.has(String(p.id))} onChange={(event) => toggleProductSelection(p.id, event.target.checked)} aria-label={`Select ${p.title}`} /></td>
                     {/* Item Thumbnail & Title */}
                     <td>
                       <div className="flex items-center gap-3">
@@ -796,7 +877,11 @@ export default function AdminProducts({
 
               <section className="admin-detail-section"><div className="admin-section-heading"><h3>Merchandising details</h3><span className="admin-section-count">Customer-facing</span></div><label className="admin-form-label">Product title<input required value={editorForm.title} onChange={(event) => setEditorForm({ ...editorForm, title: event.target.value })} className="admin-form-input" /></label><div className="admin-form-grid"><label className="admin-form-label">Team<input value={editorForm.team} onChange={(event) => setEditorForm({ ...editorForm, team: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label">League<select value={editorForm.league} onChange={(event) => setEditorForm({ ...editorForm, league: event.target.value })} className="admin-form-select">{leagues.filter((league) => league !== 'ALL').map((league) => <option value={league} key={league}>{league}</option>)}</select></label></div><div className="admin-form-grid"><label className="admin-form-label">Silhouette<input value={editorForm.silhouette} onChange={(event) => setEditorForm({ ...editorForm, silhouette: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label"><span><CircleDollarSign size={13} /> Price</span><input inputMode="decimal" value={editorForm.price} onChange={(event) => setEditorForm({ ...editorForm, price: event.target.value })} className="admin-form-input" /></label></div><label className="admin-form-label">Badge<input value={editorForm.badge} onChange={(event) => setEditorForm({ ...editorForm, badge: event.target.value })} className="admin-form-input" placeholder="HOT DROP / EXCLUSIVE" /></label><div className="admin-form-grid"><label className="admin-form-label">Primary image<input type="url" value={editorForm.thumbnail} onChange={(event) => setEditorForm({ ...editorForm, thumbnail: event.target.value })} className="admin-form-input font-mono" /></label><label className="admin-form-label">Secondary image<input type="url" value={editorForm.secondaryImage} onChange={(event) => setEditorForm({ ...editorForm, secondaryImage: event.target.value })} className="admin-form-input font-mono" /></label></div><label className="admin-form-label">Description<textarea value={editorForm.description} onChange={(event) => setEditorForm({ ...editorForm, description: event.target.value })} className="admin-form-input admin-form-textarea" rows={3} placeholder="Short merchandising story" /></label></section>
 
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3>Catalog organization</h3><span className="admin-section-count">Shopify style</span></div><div className="admin-form-grid"><label className="admin-form-label">URL handle<input value={editorForm.handle} onChange={(event) => setEditorForm({ ...editorForm, handle: event.target.value })} className="admin-form-input font-mono" placeholder="new-era-yankees" /></label><label className="admin-form-label">Product group<input value={editorForm.productGroup} onChange={(event) => setEditorForm({ ...editorForm, productGroup: event.target.value })} className="admin-form-input" placeholder="Caps" /></label></div><div className="admin-form-grid"><label className="admin-form-label">Source SKU<input value={editorForm.sourceSku} onChange={(event) => setEditorForm({ ...editorForm, sourceSku: event.target.value })} className="admin-form-input font-mono" /></label><label className="admin-form-label">Brand<input value={editorForm.brand} onChange={(event) => setEditorForm({ ...editorForm, brand: event.target.value })} className="admin-form-input" placeholder="New Era" /></label></div><label className="admin-form-label">Tags<input value={editorForm.tags} onChange={(event) => setEditorForm({ ...editorForm, tags: event.target.value })} className="admin-form-input" placeholder="new-era, mlb, fitted" /><span className="admin-form-help">Separate tags with commas for search and collections.</span></label></section>
+
               <section className="admin-detail-section"><div className="admin-section-heading"><h3><Warehouse size={15} /> Inventory by size</h3><button type="button" className="admin-text-action" onClick={addEditorSize}><Plus size={13} /> Add size</button></div><p className="admin-form-help">Số lượng bằng 0 sẽ ẩn size khỏi lựa chọn mua. Không dùng checkbox “in stock” giả.</p><div className="admin-inventory-grid">{editorForm.sizes.map((variant, index) => <div className="admin-inventory-row" key={`${variant.id || 'new'}-${index}`}><input aria-label={`Size ${index + 1}`} value={variant.size} onChange={(event) => updateEditorSize(index, 'size', event.target.value)} className="admin-form-input" placeholder="7 1/4" /><input aria-label={`Inventory for size ${variant.size || index + 1}`} type="number" min="0" value={variant.inventoryCount} onChange={(event) => updateEditorSize(index, 'inventoryCount', event.target.value)} className="admin-form-input" /><button type="button" onClick={() => removeEditorSize(index)} aria-label={`Remove size ${variant.size || index + 1}`}><X size={13} /></button></div>)}{!editorForm.sizes.length && <div className="admin-inventory-empty">No sizes yet. Add the first fitted size.</div>}</div></section>
+
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3>Search preview</h3><span className="admin-section-count">SEO content</span></div><label className="admin-form-label">SEO title<input maxLength="60" value={editorForm.seoTitle} onChange={(event) => setEditorForm({ ...editorForm, seoTitle: event.target.value })} className="admin-form-input" placeholder="New Era Yankees 59FIFTY | NLB ERA HAT" /></label><label className="admin-form-label">SEO description<textarea maxLength="160" rows={3} value={editorForm.seoDescription} onChange={(event) => setEditorForm({ ...editorForm, seoDescription: event.target.value })} className="admin-form-input admin-form-textarea" placeholder="Describe the hat, fit and drop story in one clear sentence." /></label><label className="flex items-center gap-2 text-xs text-zinc-300"><input type="checkbox" checked={editorForm.noindex} onChange={(event) => setEditorForm({ ...editorForm, noindex: event.target.checked })} className="h-4 w-4 accent-[#ff3b30]" /> Hide this listing from search engines</label></section>
 
               <section className="admin-detail-section"><div className="admin-section-heading"><h3><ShieldCheck size={15} /> Publish & source gate</h3><span className="admin-section-count">Required for sale</span></div><div className="admin-source-gate-card"><div className="admin-source-gate-card__top"><label className="admin-form-label">Listing status<select value={editorForm.status} onChange={(event) => setEditorForm({ ...editorForm, status: event.target.value })} className="admin-form-select"><option value="DRAFT">Draft — hidden</option><option value="PUBLISHED" disabled={editorForm.source1688Status !== 'MATCHED'}>Published — storefront</option></select></label><label className="admin-form-label">1688 check<select value={editorForm.source1688Status} onChange={(event) => setEditorForm({ ...editorForm, source1688Status: event.target.value, status: event.target.value === 'MATCHED' ? editorForm.status : 'DRAFT' })} className="admin-form-select"><option value="PENDING">PENDING</option><option value="REVIEW">REVIEW</option><option value="MATCHED">MATCHED / sellable</option><option value="NOT_FOUND">NOT_FOUND</option></select></label></div>{editorForm.source1688Status !== 'MATCHED' && <div className="admin-source-gate-warning"><CircleAlert size={14} /> Listing này vẫn bị khóa bán cho tới khi có URL mẫu tương ứng trên 1688.</div>}<div className="admin-form-grid"><label className="admin-form-label">1688 listing URL<input type="url" value={editorForm.source1688Url} onChange={(event) => setEditorForm({ ...editorForm, source1688Url: event.target.value })} className="admin-form-input font-mono" placeholder="https://detail.1688.com/offer/..." /></label><label className="admin-form-label">Match score (0–100)<input type="number" min="0" max="100" step="0.01" value={editorForm.source1688Score} onChange={(event) => setEditorForm({ ...editorForm, source1688Score: event.target.value })} className="admin-form-input" placeholder="88" /></label></div><label className="admin-form-label">1688 listing title<input value={editorForm.source1688Title} onChange={(event) => setEditorForm({ ...editorForm, source1688Title: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label">1688 image URL<input type="url" value={editorForm.source1688ImageUrl} onChange={(event) => setEditorForm({ ...editorForm, source1688ImageUrl: event.target.value })} className="admin-form-input font-mono" /></label><label className="admin-form-label">Verification note<textarea value={editorForm.source1688Note} onChange={(event) => setEditorForm({ ...editorForm, source1688Note: event.target.value })} className="admin-form-input admin-form-textarea" rows={2} placeholder="Màu, logo, form mũ, nhà cung cấp…" /></label></div></section>
 
