@@ -9,6 +9,27 @@ import { supabase } from '../lib/supabase';
 import { fetchCatalogFacets, fetchCatalogPage } from '../services/catalogApi';
 import { validateProduct } from '../lib/adminOperations';
 
+const DEFAULT_HAT_SIZES = ['7', '7 1/8', '7 1/4', '7 3/8', '7 1/2', '7 5/8', '7 3/4', '8'];
+
+function slugifyClient(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 160);
+}
+
+function variantPrice(value, fallback = '') {
+  const parsed = String(value ?? fallback).replace(/[^0-9.]/g, '');
+  return parsed;
+}
+
+function createVariant(size = '', price = '', inventoryCount = 0) {
+  return { id: undefined, size, price: variantPrice(price), inventoryCount: Math.max(0, Number(inventoryCount) || 0) };
+}
+
 export default function AdminProducts({ 
   products, 
   onSaveProducts, 
@@ -31,6 +52,8 @@ export default function AdminProducts({
   const [editingProduct, setEditingProduct] = useState(null);
   const [editorForm, setEditorForm] = useState(null);
   const [editorSaving, setEditorSaving] = useState(false);
+  const [bulkVariantPrice, setBulkVariantPrice] = useState('');
+  const [bulkVariantInventory, setBulkVariantInventory] = useState('');
   const [verificationProduct, setVerificationProduct] = useState(null);
   const [verificationForm, setVerificationForm] = useState({
     status: 'MATCHED',
@@ -55,16 +78,36 @@ export default function AdminProducts({
   // Form state for creating / editing product
   const [formState, setFormState] = useState({
     title: '',
+    handle: '',
     team: 'Boston Red Sox',
     league: 'MLB',
     silhouette: '59FIFTY Fitted',
+    productGroup: 'Caps',
+    sourceSku: '',
+    brand: 'New Era',
+    tags: 'new-era, mlb, fitted',
     price: '$49.99',
+    compareAtPrice: '',
     badge: 'HOT DROP',
-    thumbnail: 'https://www.lidshd.com/cdn/shop/files/23235120_04.png?v=1790339447&width=2048',
-    secondaryImage: 'https://www.lidshd.com/cdn/shop/files/23235120_03.png?v=1790339447&width=2048',
+    images: [
+      'https://www.lidshd.com/cdn/shop/files/23235120_04.png?v=1790339447&width=2048',
+      'https://www.lidshd.com/cdn/shop/files/23235120_03.png?v=1790339447&width=2048',
+    ],
+    imageInput: '',
+    imageAlt: '',
+    description: '',
+    material: '',
+    fitNote: '',
+    care: '',
+    seoTitle: '',
+    seoDescription: '',
+    noindex: false,
+    variants: DEFAULT_HAT_SIZES.map((size) => createVariant(size, '$49.99', size === '7 5/8' ? 0 : 1)),
     category: 'hats',
     status: 'PUBLISHED'
   });
+  const [newBulkVariantPrice, setNewBulkVariantPrice] = useState('');
+  const [newBulkVariantInventory, setNewBulkVariantInventory] = useState('');
 
   const facetValues = (key) => (Array.isArray(facets?.[key]) ? facets[key] : [])
     .map((item) => typeof item === 'string' ? item : item?.value)
@@ -225,47 +268,187 @@ export default function AdminProducts({
   // Actions
   const handleOpenAddModal = () => {
     setFormState({
-      title: 'New Drop Cap New Era 59FIFTY',
+      title: '',
+      handle: '',
       team: 'New York Yankees',
       league: 'MLB',
       silhouette: '59FIFTY Fitted',
+      productGroup: 'Caps',
+      sourceSku: '',
+      brand: 'New Era',
+      tags: 'new-era, mlb, fitted',
       price: '$49.99',
+      compareAtPrice: '',
       badge: 'HOT DROP',
-      thumbnail: 'https://www.lidshd.com/cdn/shop/files/23235133_04.png?v=1790339447&width=2048',
-      secondaryImage: 'https://www.lidshd.com/cdn/shop/files/23235133_03.png?v=1790339447&width=2048',
+      images: [
+        'https://www.lidshd.com/cdn/shop/files/23235133_04.png?v=1790339447&width=2048',
+        'https://www.lidshd.com/cdn/shop/files/23235133_03.png?v=1790339447&width=2048',
+      ],
+      imageInput: '',
+      imageAlt: '',
+      description: '',
+      material: '',
+      fitNote: '',
+      care: '',
+      seoTitle: '',
+      seoDescription: '',
+      noindex: false,
+      variants: DEFAULT_HAT_SIZES.map((size) => createVariant(size, '$49.99', size === '7 5/8' ? 0 : 1)),
       category: 'hats',
       status: 'DRAFT'
     });
+    setNewBulkVariantPrice('');
+    setNewBulkVariantInventory('');
     setIsNewModalOpen(true);
+  };
+
+  const updateCreateField = (key, value) => {
+    setFormState((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateCreateVariant = (index, key, value) => {
+    setFormState((current) => ({
+      ...current,
+      variants: current.variants.map((variant, variantIndex) => variantIndex === index
+        ? { ...variant, [key]: key === 'inventoryCount' ? Math.max(0, Number(value) || 0) : key === 'price' ? variantPrice(value) : value }
+        : variant),
+    }));
+  };
+
+  const addCreateVariant = (size = '', price = formState.price, inventoryCount = 0) => {
+    setFormState((current) => ({
+      ...current,
+      variants: [...current.variants, createVariant(size, price, inventoryCount)],
+    }));
+  };
+
+  const removeCreateVariant = (index) => {
+    setFormState((current) => ({ ...current, variants: current.variants.filter((_, variantIndex) => variantIndex !== index) }));
+  };
+
+  const generateCreateSizes = () => {
+    setFormState((current) => ({
+      ...current,
+      variants: DEFAULT_HAT_SIZES.map((size) => {
+        const existing = current.variants.find((variant) => variant.size === size);
+        return existing || createVariant(size, current.price, 0);
+      }),
+    }));
+  };
+
+  const applyCreateBulkVariantPrice = () => {
+    if (newBulkVariantPrice === '') return;
+    setFormState((current) => ({
+      ...current,
+      variants: current.variants.map((variant) => ({ ...variant, price: variantPrice(newBulkVariantPrice) })),
+    }));
+  };
+
+  const applyCreateBulkVariantInventory = () => {
+    if (newBulkVariantInventory === '') return;
+    setFormState((current) => ({
+      ...current,
+      variants: current.variants.map((variant) => ({ ...variant, inventoryCount: Math.max(0, Number(newBulkVariantInventory) || 0) })),
+    }));
+  };
+
+  const addCreateImage = () => {
+    const imageUrl = String(formState.imageInput || '').trim();
+    if (!imageUrl) return;
+    setFormState((current) => ({ ...current, images: [...current.images, imageUrl], imageInput: '' }));
+  };
+
+  const removeCreateImage = (index) => {
+    setFormState((current) => ({ ...current, images: current.images.filter((_, imageIndex) => imageIndex !== index) }));
+  };
+
+  const moveCreateImageToCover = (index) => {
+    setFormState((current) => {
+      const next = [...current.images];
+      const [cover] = next.splice(index, 1);
+      return { ...current, images: [cover, ...next] };
+    });
+  };
+
+  const suggestCreateTitle = () => {
+    const title = [formState.brand || 'New Era', formState.team, formState.silhouette, formState.league]
+      .map((part) => String(part || '').trim())
+      .filter(Boolean)
+      .join(' ');
+    setFormState((current) => ({ ...current, title, handle: slugifyClient(title) }));
+  };
+
+  const suggestCreateDescription = () => {
+    const title = formState.title || `${formState.team} ${formState.silhouette}`.trim();
+    const description = `${title} made for collectors who want an authentic fit and a clean team finish. `
+      + `Built in ${formState.silhouette || 'a structured cap'} with a comfortable everyday profile.`;
+    setFormState((current) => ({ ...current, description }));
   };
 
   const handleCreateProduct = async (e) => {
     e.preventDefault();
+    const images = (formState.images || []).map((image) => String(image || '').trim()).filter(Boolean);
+    const variants = (formState.variants || [])
+      .map((variant) => ({
+        ...variant,
+        size: String(variant.size || '').trim(),
+        price: variantPrice(variant.price, formState.price),
+        inventoryCount: Math.max(0, Number(variant.inventoryCount) || 0),
+        inStock: Number(variant.inventoryCount) > 0,
+      }))
+      .filter((variant) => variant.size);
+    if (!formState.title.trim()) {
+      setNotice('Product title is required.');
+      return;
+    }
+    if (!images.length) {
+      setNotice('Add at least one product image.');
+      return;
+    }
     const newProduct = {
       id: Date.now(),
       title: formState.title,
+      handle: formState.handle || slugifyClient(formState.title),
       team: formState.team,
       league: formState.league,
       silhouette: formState.silhouette,
       price: formState.price.startsWith('$') ? formState.price : `$${formState.price}`,
       badge: formState.badge,
-      thumbnail: formState.thumbnail,
-      secondaryImage: formState.secondaryImage,
-      images: [formState.thumbnail, formState.secondaryImage],
+      thumbnail: images[0],
+      secondaryImage: images[1] || '',
+      images,
       category: formState.category,
       status: formState.status,
-      sizes: [
-        { size: '7', inStock: true },
-        { size: '7 1/8', inStock: true },
-        { size: '7 1/4', inStock: true },
-        { size: '7 3/8', inStock: true },
-        { size: '7 1/2', inStock: true },
-        { size: '7 5/8', inStock: false },
-        { size: '7 3/4', inStock: true },
-        { size: '8', inStock: true }
-      ],
-      tags: [formState.league, formState.team, formState.silhouette]
+      sizes: variants,
+      tags: formState.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+      productGroup: formState.productGroup,
+      sourceSku: formState.sourceSku,
+      brand: formState.brand,
+      description: formState.description,
+      source1688Status: 'PENDING',
+      metadata: {
+        brand: formState.brand,
+        source_product_group: formState.productGroup,
+        source_sku: formState.sourceSku,
+        image_alt: formState.imageAlt || formState.title,
+        compare_at_price: variantPrice(formState.compareAtPrice),
+        content: {
+          material: formState.material,
+          fit: formState.fitNote,
+          care: formState.care,
+        },
+        seo_title: formState.seoTitle || formState.title,
+        seo_description: formState.seoDescription || formState.description,
+        seo_noindex: Boolean(formState.noindex),
+      },
     };
+
+    try {
+      validateProduct(newProduct);
+    } catch (error) {
+      setNotice(error.message);
+      return;
+    }
 
     try {
       const saved = await onSaveProduct?.(newProduct) || newProduct;
@@ -391,8 +574,15 @@ export default function AdminProducts({
 
   const openEditor = (product) => {
     setEditingProduct(product);
+    setBulkVariantPrice('');
+    setBulkVariantInventory('');
     const metadata = product.metadata && typeof product.metadata === 'object' ? product.metadata : {};
     const seo = metadata.seo && typeof metadata.seo === 'object' ? metadata.seo : {};
+    const content = metadata.content && typeof metadata.content === 'object' ? metadata.content : {};
+    const imageList = (Array.isArray(product.images) && product.images.length
+      ? product.images
+      : [product.thumbnail, product.secondaryImage || product.secondary_image]
+    ).filter(Boolean);
     setEditorForm({
       title: product.title || '',
       handle: product.handle || '',
@@ -404,12 +594,17 @@ export default function AdminProducts({
       brand: metadata.brand || '',
       tags: Array.isArray(product.tags) ? product.tags.join(', ') : '',
       price: String(product.price || '').replace('$', ''),
+      compareAtPrice: metadata.compare_at_price || '',
       badge: product.badge || '',
-      thumbnail: product.thumbnail || '',
-      secondaryImage: product.secondaryImage || product.secondary_image || '',
+      images: imageList,
+      imageInput: '',
+      imageAlt: metadata.image_alt || product.title || '',
       source1688ImageUrl: product.source1688ImageUrl || '',
       source1688Score: product.source1688Score == null ? '' : String(product.source1688Score),
       description: product.description || '',
+      material: content.material || '',
+      fitNote: content.fit || '',
+      care: content.care || '',
       seoTitle: metadata.seo_title || seo.title || '',
       seoDescription: metadata.seo_description || seo.description || '',
       noindex: Boolean(metadata.seo_noindex ?? seo.noindex),
@@ -421,6 +616,7 @@ export default function AdminProducts({
       sizes: (product.sizes || []).map((variant) => ({
         id: variant.id,
         size: variant.size || '',
+        price: String(variant.price || product.price || '').replace('$', ''),
         inventoryCount: Number(variant.inventoryCount ?? variant.inventory_count ?? (variant.inStock ? 1 : 0)),
       })),
     });
@@ -437,17 +633,57 @@ export default function AdminProducts({
     setEditorForm((current) => ({
       ...current,
       sizes: current.sizes.map((variant, variantIndex) => variantIndex === index
-        ? { ...variant, [key]: key === 'inventoryCount' ? Math.max(0, Number(value) || 0) : value }
+        ? { ...variant, [key]: key === 'inventoryCount' ? Math.max(0, Number(value) || 0) : key === 'price' ? variantPrice(value) : value }
         : variant),
     }));
   };
 
   const addEditorSize = () => {
-    setEditorForm((current) => ({ ...current, sizes: [...current.sizes, { size: '', inventoryCount: 0 }] }));
+    setEditorForm((current) => ({ ...current, sizes: [...current.sizes, { id: undefined, size: '', price: current.price, inventoryCount: 0 }] }));
   };
 
   const removeEditorSize = (index) => {
     setEditorForm((current) => ({ ...current, sizes: current.sizes.filter((_, variantIndex) => variantIndex !== index) }));
+  };
+
+  const applyEditorBulkVariantPrice = () => {
+    if (!editorForm || bulkVariantPrice === '') return;
+    setEditorForm((current) => ({
+      ...current,
+      sizes: current.sizes.map((variant) => ({ ...variant, price: variantPrice(bulkVariantPrice) })),
+    }));
+  };
+
+  const applyEditorBulkVariantInventory = () => {
+    if (!editorForm || bulkVariantInventory === '') return;
+    setEditorForm((current) => ({
+      ...current,
+      sizes: current.sizes.map((variant) => ({ ...variant, inventoryCount: Math.max(0, Number(bulkVariantInventory) || 0) })),
+    }));
+  };
+
+  const updateEditorImage = (index, value) => {
+    setEditorForm((current) => ({
+      ...current,
+      images: current.images.map((image, imageIndex) => imageIndex === index ? value : image),
+    }));
+  };
+
+  const addEditorImage = () => {
+    if (!editorForm?.imageInput?.trim()) return;
+    setEditorForm((current) => ({ ...current, images: [...current.images, current.imageInput.trim()], imageInput: '' }));
+  };
+
+  const removeEditorImage = (index) => {
+    setEditorForm((current) => ({ ...current, images: current.images.filter((_, imageIndex) => imageIndex !== index) }));
+  };
+
+  const moveEditorImageToCover = (index) => {
+    setEditorForm((current) => {
+      const next = [...current.images];
+      const [cover] = next.splice(index, 1);
+      return { ...current, images: [cover, ...next] };
+    });
   };
 
   const handleSaveEditor = async (event) => {
@@ -469,6 +705,13 @@ export default function AdminProducts({
       metadata: {
         ...(editingProduct.metadata || {}),
         brand: editorForm.brand.trim(),
+        image_alt: editorForm.imageAlt.trim(),
+        compare_at_price: variantPrice(editorForm.compareAtPrice),
+        content: {
+          material: editorForm.material.trim(),
+          fit: editorForm.fitNote.trim(),
+          care: editorForm.care.trim(),
+        },
         seo_title: editorForm.seoTitle.trim(),
         seo_description: editorForm.seoDescription.trim(),
         seo_noindex: Boolean(editorForm.noindex),
@@ -476,6 +719,7 @@ export default function AdminProducts({
       price: editorForm.price.startsWith('$') ? editorForm.price : `$${editorForm.price}`,
       sizes: editorForm.sizes.filter((variant) => variant.size.trim()).map((variant) => ({
         ...variant,
+        price: variantPrice(variant.price, editorForm.price),
         inStock: Number(variant.inventoryCount) > 0,
       })),
       source1688Status: editorForm.source1688Status,
@@ -484,7 +728,9 @@ export default function AdminProducts({
       source1688ImageUrl: editorForm.source1688ImageUrl,
       source1688Score: editorForm.source1688Score,
       source1688Note: editorForm.source1688Note,
-      images: [editorForm.thumbnail, editorForm.secondaryImage].filter(Boolean),
+      images: editorForm.images.filter(Boolean),
+      thumbnail: editorForm.images.filter(Boolean)[0] || '',
+      secondaryImage: editorForm.images.filter(Boolean)[1] || '',
       is_active: editorForm.status === 'PUBLISHED' && editorForm.source1688Status === 'MATCHED',
     };
     try {
@@ -871,15 +1117,17 @@ export default function AdminProducts({
             </header>
             <form className="admin-drawer-body admin-product-editor" onSubmit={handleSaveEditor}>
               <div className="admin-editor-hero">
-                <img src={editorForm.thumbnail || undefined} alt="" />
-                <div><strong>{editorForm.title || 'Untitled listing'}</strong><span>{editingProduct.handle || `product-${editingProduct.id}`}</span><button type="button" className="admin-text-action" onClick={() => setEditorForm({ ...editorForm, thumbnail: editorForm.thumbnail })}><RotateCcw size={13} /> Keep current media</button></div>
+                <img src={editorForm.images?.[0] || undefined} alt={editorForm.imageAlt || editorForm.title} />
+                <div><strong>{editorForm.title || 'Untitled listing'}</strong><span>{editorForm.handle || `product-${editingProduct.id}`}</span><button type="button" className="admin-text-action" onClick={() => setEditorForm({ ...editorForm, images: editorForm.images })}><RotateCcw size={13} /> Keep current media</button></div>
               </div>
 
-              <section className="admin-detail-section"><div className="admin-section-heading"><h3>Merchandising details</h3><span className="admin-section-count">Customer-facing</span></div><label className="admin-form-label">Product title<input required value={editorForm.title} onChange={(event) => setEditorForm({ ...editorForm, title: event.target.value })} className="admin-form-input" /></label><div className="admin-form-grid"><label className="admin-form-label">Team<input value={editorForm.team} onChange={(event) => setEditorForm({ ...editorForm, team: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label">League<select value={editorForm.league} onChange={(event) => setEditorForm({ ...editorForm, league: event.target.value })} className="admin-form-select">{leagues.filter((league) => league !== 'ALL').map((league) => <option value={league} key={league}>{league}</option>)}</select></label></div><div className="admin-form-grid"><label className="admin-form-label">Silhouette<input value={editorForm.silhouette} onChange={(event) => setEditorForm({ ...editorForm, silhouette: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label"><span><CircleDollarSign size={13} /> Price</span><input inputMode="decimal" value={editorForm.price} onChange={(event) => setEditorForm({ ...editorForm, price: event.target.value })} className="admin-form-input" /></label></div><label className="admin-form-label">Badge<input value={editorForm.badge} onChange={(event) => setEditorForm({ ...editorForm, badge: event.target.value })} className="admin-form-input" placeholder="HOT DROP / EXCLUSIVE" /></label><div className="admin-form-grid"><label className="admin-form-label">Primary image<input type="url" value={editorForm.thumbnail} onChange={(event) => setEditorForm({ ...editorForm, thumbnail: event.target.value })} className="admin-form-input font-mono" /></label><label className="admin-form-label">Secondary image<input type="url" value={editorForm.secondaryImage} onChange={(event) => setEditorForm({ ...editorForm, secondaryImage: event.target.value })} className="admin-form-input font-mono" /></label></div><label className="admin-form-label">Description<textarea value={editorForm.description} onChange={(event) => setEditorForm({ ...editorForm, description: event.target.value })} className="admin-form-input admin-form-textarea" rows={3} placeholder="Short merchandising story" /></label></section>
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3>Merchandising details</h3><span className="admin-section-count">Customer-facing</span></div><label className="admin-form-label">Product title<input required value={editorForm.title} onChange={(event) => setEditorForm({ ...editorForm, title: event.target.value })} className="admin-form-input" /></label><div className="admin-form-grid"><label className="admin-form-label">Team<input value={editorForm.team} onChange={(event) => setEditorForm({ ...editorForm, team: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label">League<select value={editorForm.league} onChange={(event) => setEditorForm({ ...editorForm, league: event.target.value })} className="admin-form-select">{leagues.filter((league) => league !== 'ALL').map((league) => <option value={league} key={league}>{league}</option>)}</select></label></div><div className="admin-form-grid"><label className="admin-form-label">Silhouette<input value={editorForm.silhouette} onChange={(event) => setEditorForm({ ...editorForm, silhouette: event.target.value })} className="admin-form-input" /></label><label className="admin-form-label"><span><CircleDollarSign size={13} /> Base price</span><input inputMode="decimal" value={editorForm.price} onChange={(event) => setEditorForm({ ...editorForm, price: event.target.value })} className="admin-form-input" /></label></div><div className="admin-form-grid"><label className="admin-form-label">Compare-at price<input inputMode="decimal" value={editorForm.compareAtPrice} onChange={(event) => setEditorForm({ ...editorForm, compareAtPrice: event.target.value })} className="admin-form-input" placeholder="Optional sale reference" /></label><label className="admin-form-label">Badge<input value={editorForm.badge} onChange={(event) => setEditorForm({ ...editorForm, badge: event.target.value })} className="admin-form-input" placeholder="HOT DROP / EXCLUSIVE" /></label></div><label className="admin-form-label">Description<textarea value={editorForm.description} onChange={(event) => setEditorForm({ ...editorForm, description: event.target.value })} className="admin-form-input admin-form-textarea" rows={4} placeholder="Short merchandising story" /><span className="admin-form-help">Write the first sentence for the shopper. Mention the silhouette, team detail and why this drop is different.</span></label><div className="admin-form-grid"><label className="admin-form-label">Material<input value={editorForm.material} onChange={(event) => setEditorForm({ ...editorForm, material: event.target.value })} className="admin-form-input" placeholder="100% cotton twill" /></label><label className="admin-form-label">Fit note<input value={editorForm.fitNote} onChange={(event) => setEditorForm({ ...editorForm, fitNote: event.target.value })} className="admin-form-input" placeholder="Structured, high crown" /></label></div><label className="admin-form-label">Care instructions<input value={editorForm.care} onChange={(event) => setEditorForm({ ...editorForm, care: event.target.value })} className="admin-form-input" placeholder="Spot clean only" /></label></section>
+
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Image size={15} /> Product media</h3><span className="admin-section-count">{editorForm.images.length} image{editorForm.images.length === 1 ? '' : 's'}</span></div><div className="admin-media-grid">{editorForm.images.map((image, index) => <div className={`admin-media-card ${index === 0 ? 'is-cover' : ''}`} key={`${image}-${index}`}><img src={image} alt={editorForm.imageAlt || editorForm.title} /><div className="admin-media-card__actions"><button type="button" onClick={() => moveEditorImageToCover(index)} disabled={index === 0}>{index === 0 ? 'Cover' : 'Set cover'}</button><button type="button" onClick={() => removeEditorImage(index)} aria-label={`Remove image ${index + 1}`}><X size={12} /></button></div><input value={image} onChange={(event) => updateEditorImage(index, event.target.value)} className="admin-form-input font-mono" aria-label={`Image URL ${index + 1}`} /></div>)}{!editorForm.images.length && <div className="admin-media-empty">Add a cover image to make this listing shoppable.</div>}</div><div className="admin-media-add"><input value={editorForm.imageInput} onChange={(event) => setEditorForm({ ...editorForm, imageInput: event.target.value })} className="admin-form-input font-mono" placeholder="Paste another image URL" /><button type="button" className="admin-button" onClick={addEditorImage}><Plus size={13} /> Add image</button></div><label className="admin-form-label">Image alt text<input value={editorForm.imageAlt} onChange={(event) => setEditorForm({ ...editorForm, imageAlt: event.target.value })} className="admin-form-input" placeholder="Describe the hat for search and accessibility" /></label></section>
 
               <section className="admin-detail-section"><div className="admin-section-heading"><h3>Catalog organization</h3><span className="admin-section-count">Shopify style</span></div><div className="admin-form-grid"><label className="admin-form-label">URL handle<input value={editorForm.handle} onChange={(event) => setEditorForm({ ...editorForm, handle: event.target.value })} className="admin-form-input font-mono" placeholder="new-era-yankees" /></label><label className="admin-form-label">Product group<input value={editorForm.productGroup} onChange={(event) => setEditorForm({ ...editorForm, productGroup: event.target.value })} className="admin-form-input" placeholder="Caps" /></label></div><div className="admin-form-grid"><label className="admin-form-label">Source SKU<input value={editorForm.sourceSku} onChange={(event) => setEditorForm({ ...editorForm, sourceSku: event.target.value })} className="admin-form-input font-mono" /></label><label className="admin-form-label">Brand<input value={editorForm.brand} onChange={(event) => setEditorForm({ ...editorForm, brand: event.target.value })} className="admin-form-input" placeholder="New Era" /></label></div><label className="admin-form-label">Tags<input value={editorForm.tags} onChange={(event) => setEditorForm({ ...editorForm, tags: event.target.value })} className="admin-form-input" placeholder="new-era, mlb, fitted" /><span className="admin-form-help">Separate tags with commas for search and collections.</span></label></section>
 
-              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Warehouse size={15} /> Inventory by size</h3><button type="button" className="admin-text-action" onClick={addEditorSize}><Plus size={13} /> Add size</button></div><p className="admin-form-help">Số lượng bằng 0 sẽ ẩn size khỏi lựa chọn mua. Không dùng checkbox “in stock” giả.</p><div className="admin-inventory-grid">{editorForm.sizes.map((variant, index) => <div className="admin-inventory-row" key={`${variant.id || 'new'}-${index}`}><input aria-label={`Size ${index + 1}`} value={variant.size} onChange={(event) => updateEditorSize(index, 'size', event.target.value)} className="admin-form-input" placeholder="7 1/4" /><input aria-label={`Inventory for size ${variant.size || index + 1}`} type="number" min="0" value={variant.inventoryCount} onChange={(event) => updateEditorSize(index, 'inventoryCount', event.target.value)} className="admin-form-input" /><button type="button" onClick={() => removeEditorSize(index)} aria-label={`Remove size ${variant.size || index + 1}`}><X size={13} /></button></div>)}{!editorForm.sizes.length && <div className="admin-inventory-empty">No sizes yet. Add the first fitted size.</div>}</div></section>
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Warehouse size={15} /> Variants & inventory</h3><button type="button" className="admin-text-action" onClick={addEditorSize}><Plus size={13} /> Add variant</button></div><p className="admin-form-help">Mỗi size có thể có giá và tồn kho riêng. Giá/tồn kho hàng loạt chỉ áp dụng trên bảng này và được lưu cùng sản phẩm.</p><div className="admin-variant-bulkbar"><label className="admin-form-label"><span><CircleDollarSign size={12} /> Apply price to all</span><input inputMode="decimal" value={bulkVariantPrice} onChange={(event) => setBulkVariantPrice(event.target.value)} className="admin-form-input" placeholder={editorForm.price || '49.99'} /></label><button type="button" className="admin-button" onClick={applyEditorBulkVariantPrice}>Apply price</button><label className="admin-form-label"><span><Warehouse size={12} /> Set stock for all</span><input type="number" min="0" value={bulkVariantInventory} onChange={(event) => setBulkVariantInventory(event.target.value)} className="admin-form-input" placeholder="0" /></label><button type="button" className="admin-button" onClick={applyEditorBulkVariantInventory}>Apply stock</button></div><div className="admin-variant-table"><div className="admin-variant-table__head"><span>Option / size</span><span>Price</span><span>Available</span><span aria-hidden="true" /></div>{editorForm.sizes.map((variant, index) => <div className="admin-variant-row" key={`${variant.id || 'new'}-${index}`}><input aria-label={`Size ${index + 1}`} value={variant.size} onChange={(event) => updateEditorSize(index, 'size', event.target.value)} className="admin-form-input" placeholder="7 1/4" /><div className="admin-price-input"><span>$</span><input aria-label={`Price for ${variant.size || index + 1}`} inputMode="decimal" value={variant.price} onChange={(event) => updateEditorSize(index, 'price', event.target.value)} className="admin-form-input" /></div><input aria-label={`Inventory for size ${variant.size || index + 1}`} type="number" min="0" value={variant.inventoryCount} onChange={(event) => updateEditorSize(index, 'inventoryCount', event.target.value)} className="admin-form-input" /><button type="button" onClick={() => removeEditorSize(index)} aria-label={`Remove variant ${variant.size || index + 1}`}><X size={13} /></button></div>)}{!editorForm.sizes.length && <div className="admin-inventory-empty">No variants yet. Add the first fitted size.</div>}</div></section>
 
               <section className="admin-detail-section"><div className="admin-section-heading"><h3>Search preview</h3><span className="admin-section-count">SEO content</span></div><label className="admin-form-label">SEO title<input maxLength="60" value={editorForm.seoTitle} onChange={(event) => setEditorForm({ ...editorForm, seoTitle: event.target.value })} className="admin-form-input" placeholder="New Era Yankees 59FIFTY | NLB ERA HAT" /></label><label className="admin-form-label">SEO description<textarea maxLength="160" rows={3} value={editorForm.seoDescription} onChange={(event) => setEditorForm({ ...editorForm, seoDescription: event.target.value })} className="admin-form-input admin-form-textarea" placeholder="Describe the hat, fit and drop story in one clear sentence." /></label><label className="flex items-center gap-2 text-xs text-zinc-300"><input type="checkbox" checked={editorForm.noindex} onChange={(event) => setEditorForm({ ...editorForm, noindex: event.target.checked })} className="h-4 w-4 accent-[#ff3b30]" /> Hide this listing from search engines</label></section>
 
@@ -961,111 +1209,34 @@ export default function AdminProducts({
 
       {/* Create New Product Modal */}
       {isNewModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-[#141414] border border-[#2e2e2e] rounded-xl max-w-[560px] w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#252525]">
-              <h3 className="font-display text-xl font-black text-white uppercase tracking-tight">
-                CREATE NEW DROP LISTING
-              </h3>
-              <button onClick={() => setIsNewModalOpen(false)} className="text-gray-400 hover:text-white">
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateProduct} className="space-y-4">
-              <div className="rounded border border-amber-800/50 bg-amber-950/25 px-3 py-2 text-[11px] leading-5 text-amber-200">
-                Sản phẩm mới sẽ được lưu dưới dạng <strong>Draft</strong>. Chỉ sau khi đối chiếu URL listing tương ứng trên 1688 và đặt trạng thái MATCHED mới có thể publish.
-              </div>
+        <div className="admin-drawer-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIsNewModalOpen(false); }}>
+          <aside className="admin-drawer admin-product-drawer admin-create-product-drawer" role="dialog" aria-modal="true" aria-labelledby="new-product-title">
+            <header className="admin-drawer-header">
               <div>
-                <label className="text-xs font-bold text-gray-400 block mb-1">Product Title</label>
-                <input 
-                  type="text" 
-                  required
-                  value={formState.title}
-                  onChange={(e) => setFormState({ ...formState, title: e.target.value })}
-                  className="w-full bg-[#1c1c1c] border border-[#333] rounded px-3 py-2 text-xs text-white font-bold focus:border-white focus:outline-none"
-                />
+                <span className="admin-intro-eyebrow">CATALOG / NEW PRODUCT</span>
+                <h2 id="new-product-title">Create product</h2>
+                <p>Chuẩn hoá nội dung, media và biến thể trước khi gửi listing đi kiểm tra 1688.</p>
               </div>
+              <button type="button" className="admin-icon-button" onClick={() => setIsNewModalOpen(false)} aria-label="Close new product form"><X size={18} /></button>
+            </header>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-gray-400 block mb-1">Team Name</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={formState.team}
-                    onChange={(e) => setFormState({ ...formState, team: e.target.value })}
-                    className="w-full bg-[#1c1c1c] border border-[#333] rounded px-3 py-2 text-xs text-white focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-400 block mb-1">League</label>
-                  <select 
-                    value={formState.league}
-                    onChange={(e) => setFormState({ ...formState, league: e.target.value })}
-                    className="w-full bg-[#1c1c1c] border border-[#333] rounded px-3 py-2 text-xs text-white focus:outline-none"
-                  >
-                    <option value="MLB">MLB</option>
-                    <option value="NBA">NBA</option>
-                    <option value="NFL">NFL</option>
-                    <option value="NHL">NHL</option>
-                    <option value="MiLB">MiLB</option>
-                    <option value="PINS">PINS</option>
-                  </select>
-                </div>
-              </div>
+            <form onSubmit={handleCreateProduct} className="admin-drawer-body admin-product-editor">
+              <div className="admin-create-summary"><div><strong>Draft workspace</strong><span>Listing mới luôn ẩn khỏi storefront cho tới khi được MATCHED trên 1688.</span></div><span className="admin-status-badge is-warning">DRAFT</span></div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-gray-400 block mb-1">Price (e.g. $49.99)</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={formState.price}
-                    onChange={(e) => setFormState({ ...formState, price: e.target.value })}
-                    className="w-full bg-[#1c1c1c] border border-[#333] rounded px-3 py-2 text-xs text-white font-bold focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-400 block mb-1">Badge</label>
-                  <input 
-                    type="text" 
-                    value={formState.badge}
-                    onChange={(e) => setFormState({ ...formState, badge: e.target.value })}
-                    placeholder="HOT DROP, EXCLUSIVE"
-                    className="w-full bg-[#1c1c1c] border border-[#333] rounded px-3 py-2 text-xs text-white focus:outline-none"
-                  />
-                </div>
-              </div>
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3>Product information</h3><span className="admin-section-count">Title & content</span></div><div className="admin-title-field"><label className="admin-form-label">Product title<input required autoFocus value={formState.title} onChange={(event) => updateCreateField('title', event.target.value)} className="admin-form-input admin-form-input--title" placeholder="New Era Yankees 59FIFTY Championship" /></label><div className="admin-field-meta"><span>{formState.title.length}/70 characters</span><span className={formState.title.length >= 20 && formState.title.length <= 70 ? 'is-good' : ''}>{formState.title.length >= 20 && formState.title.length <= 70 ? 'Search-ready title' : 'Aim for 20–70 characters'}</span><button type="button" className="admin-text-action" onClick={suggestCreateTitle}><Flame size={12} /> Suggest title</button></div></div><div className="admin-form-grid"><label className="admin-form-label">Team<input required value={formState.team} onChange={(event) => updateCreateField('team', event.target.value)} className="admin-form-input" /></label><label className="admin-form-label">League<select value={formState.league} onChange={(event) => updateCreateField('league', event.target.value)} className="admin-form-select"><option value="MLB">MLB</option><option value="NBA">NBA</option><option value="NFL">NFL</option><option value="NHL">NHL</option><option value="MiLB">MiLB</option><option value="NCAA">NCAA</option><option value="PINS">PINS</option></select></label></div><div className="admin-form-grid"><label className="admin-form-label">Silhouette<input value={formState.silhouette} onChange={(event) => updateCreateField('silhouette', event.target.value)} className="admin-form-input" placeholder="59FIFTY Fitted" /></label><label className="admin-form-label">Product group<input value={formState.productGroup} onChange={(event) => updateCreateField('productGroup', event.target.value)} className="admin-form-input" placeholder="Caps" /></label></div><div className="admin-form-grid"><label className="admin-form-label">Brand<input value={formState.brand} onChange={(event) => updateCreateField('brand', event.target.value)} className="admin-form-input" placeholder="New Era" /></label><label className="admin-form-label">Source SKU<input value={formState.sourceSku} onChange={(event) => updateCreateField('sourceSku', event.target.value)} className="admin-form-input font-mono" placeholder="Optional supplier SKU" /></label></div><div className="admin-form-grid"><label className="admin-form-label">URL handle<input value={formState.handle} onChange={(event) => updateCreateField('handle', event.target.value)} className="admin-form-input font-mono" placeholder="new-era-yankees-59fifty" /></label><label className="admin-form-label">Tags<input value={formState.tags} onChange={(event) => updateCreateField('tags', event.target.value)} className="admin-form-input" placeholder="new-era, mlb, fitted" /></label></div><label className="admin-form-label">Description<textarea value={formState.description} onChange={(event) => updateCreateField('description', event.target.value)} className="admin-form-input admin-form-textarea" rows={5} placeholder="Tell shoppers what makes this hat worth collecting." /><span className="admin-form-help">Keep the first sentence specific: silhouette, team detail and the reason to collect this drop.</span></label><button type="button" className="admin-text-action admin-content-suggestion" onClick={suggestCreateDescription}><Flame size={12} /> Fill a merchandising description</button><div className="admin-form-grid"><label className="admin-form-label">Material<input value={formState.material} onChange={(event) => updateCreateField('material', event.target.value)} className="admin-form-input" placeholder="100% cotton twill" /></label><label className="admin-form-label">Fit note<input value={formState.fitNote} onChange={(event) => updateCreateField('fitNote', event.target.value)} className="admin-form-input" placeholder="Structured, high crown" /></label></div><label className="admin-form-label">Care instructions<input value={formState.care} onChange={(event) => updateCreateField('care', event.target.value)} className="admin-form-input" placeholder="Spot clean only" /></label></section>
 
-              <div>
-                <label className="text-xs font-bold text-gray-400 block mb-1">Thumbnail Image URL</label>
-                <input 
-                  type="text" 
-                  required
-                  value={formState.thumbnail}
-                  onChange={(e) => setFormState({ ...formState, thumbnail: e.target.value })}
-                  className="w-full bg-[#1c1c1c] border border-[#333] rounded px-3 py-2 text-xs text-white font-mono focus:outline-none"
-                />
-              </div>
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Image size={15} /> Images</h3><span className="admin-section-count">{formState.images.length} image{formState.images.length === 1 ? '' : 's'} / cover first</span></div><div className="admin-media-grid">{formState.images.map((image, index) => <div className={`admin-media-card ${index === 0 ? 'is-cover' : ''}`} key={`${image}-${index}`}><img src={image} alt={formState.imageAlt || formState.title} /><div className="admin-media-card__actions"><button type="button" onClick={() => moveCreateImageToCover(index)} disabled={index === 0}>{index === 0 ? 'Cover image' : 'Set cover'}</button><button type="button" onClick={() => removeCreateImage(index)} aria-label={`Remove image ${index + 1}`}><X size={12} /></button></div></div>)}{!formState.images.length && <div className="admin-media-empty">Add a cover image before saving this listing.</div>}</div><div className="admin-media-add"><input type="url" value={formState.imageInput} onChange={(event) => updateCreateField('imageInput', event.target.value)} className="admin-form-input font-mono" placeholder="Paste image URL from supplier or 1688" /><button type="button" className="admin-button" onClick={addCreateImage}><Plus size={13} /> Add image</button></div><label className="admin-form-label">Image alt text<input value={formState.imageAlt} onChange={(event) => updateCreateField('imageAlt', event.target.value)} className="admin-form-input" placeholder="Describe colour, team and silhouette" /><span className="admin-form-help">This text is saved with the product for accessibility and image search.</span></label></section>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-[#252525]">
-                <button 
-                  type="button" 
-                  onClick={() => setIsNewModalOpen(false)}
-                  className="btn-secondary text-xs px-4 py-2"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  className="btn-flame text-xs px-5 py-2 font-bold"
-                >
-                  Save draft
-                </button>
-              </div>
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3><CircleDollarSign size={15} /> Pricing</h3><span className="admin-section-count">Base & compare-at</span></div><div className="admin-form-grid"><label className="admin-form-label"><span><CircleDollarSign size={12} /> Base price</span><input required inputMode="decimal" value={formState.price} onChange={(event) => updateCreateField('price', event.target.value)} className="admin-form-input" placeholder="49.99" /></label><label className="admin-form-label">Compare-at price<input inputMode="decimal" value={formState.compareAtPrice} onChange={(event) => updateCreateField('compareAtPrice', event.target.value)} className="admin-form-input" placeholder="Optional sale reference" /></label></div><label className="admin-form-label">Badge<input value={formState.badge} onChange={(event) => updateCreateField('badge', event.target.value)} className="admin-form-input" placeholder="HOT DROP / EXCLUSIVE" /></label><p className="admin-form-help">Base price is the fallback. Each variant below can override it with its own price.</p></section>
+
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3><Warehouse size={15} /> Variants</h3><div className="admin-section-heading__actions"><button type="button" className="admin-text-action" onClick={generateCreateSizes}><RotateCcw size={12} /> Generate fitted sizes</button><button type="button" className="admin-text-action" onClick={() => addCreateVariant()}><Plus size={13} /> Add variant</button></div></div><p className="admin-form-help">Tạo bao nhiêu size tuỳ ý. Giá và tồn kho được lưu riêng cho từng dòng, nên bạn có thể bán size hiếm với giá khác.</p><div className="admin-variant-bulkbar"><label className="admin-form-label"><span><CircleDollarSign size={12} /> Apply price to all</span><input inputMode="decimal" value={newBulkVariantPrice} onChange={(event) => setNewBulkVariantPrice(event.target.value)} className="admin-form-input" placeholder={formState.price || '49.99'} /></label><button type="button" className="admin-button" onClick={applyCreateBulkVariantPrice}>Apply price</button><label className="admin-form-label"><span><Warehouse size={12} /> Set stock for all</span><input type="number" min="0" value={newBulkVariantInventory} onChange={(event) => setNewBulkVariantInventory(event.target.value)} className="admin-form-input" placeholder="0" /></label><button type="button" className="admin-button" onClick={applyCreateBulkVariantInventory}>Apply stock</button></div><div className="admin-variant-table"><div className="admin-variant-table__head"><span>Option / size</span><span>Price</span><span>Available</span><span aria-hidden="true" /></div>{formState.variants.map((variant, index) => <div className="admin-variant-row" key={`${variant.id || 'new'}-${index}`}><input aria-label={`Variant ${index + 1} size`} value={variant.size} onChange={(event) => updateCreateVariant(index, 'size', event.target.value)} className="admin-form-input" placeholder="7 1/4" /><div className="admin-price-input"><span>$</span><input aria-label={`Variant ${index + 1} price`} inputMode="decimal" value={variant.price} onChange={(event) => updateCreateVariant(index, 'price', event.target.value)} className="admin-form-input" /></div><input aria-label={`Variant ${index + 1} inventory`} type="number" min="0" value={variant.inventoryCount} onChange={(event) => updateCreateVariant(index, 'inventoryCount', event.target.value)} className="admin-form-input" /><button type="button" onClick={() => removeCreateVariant(index)} aria-label={`Remove variant ${index + 1}`}><X size={13} /></button></div>)}{!formState.variants.length && <div className="admin-inventory-empty">No variants yet. Add a size or generate fitted sizes.</div>}</div></section>
+
+              <section className="admin-detail-section"><div className="admin-section-heading"><h3>Search preview</h3><span className="admin-section-count">SEO content</span></div><label className="admin-form-label">SEO title<input maxLength="60" value={formState.seoTitle} onChange={(event) => updateCreateField('seoTitle', event.target.value)} className="admin-form-input" placeholder="New Era Yankees 59FIFTY | NLB ERA HAT" /></label><label className="admin-form-label">SEO description<textarea maxLength="160" rows={3} value={formState.seoDescription} onChange={(event) => updateCreateField('seoDescription', event.target.value)} className="admin-form-input admin-form-textarea" placeholder="Describe the hat, fit and drop story in one clear sentence." /></label><label className="flex items-center gap-2 text-xs text-zinc-300"><input type="checkbox" checked={formState.noindex} onChange={(event) => updateCreateField('noindex', event.target.checked)} className="h-4 w-4 accent-[#ff3b30]" /> Hide this listing from search engines</label></section>
+
+              <div className="admin-source-gate-card"><div className="admin-source-gate-warning"><CircleAlert size={14} /> Draft mới chỉ được bán sau khi bạn mở Image Search 1688, tìm thấy mẫu tương ứng và lưu trạng thái MATCHED.</div></div>
+              <div className="admin-editor-footer"><button type="button" className="btn-secondary text-xs px-4 py-2.5" onClick={() => setIsNewModalOpen(false)}>Cancel</button><button type="submit" className="btn-flame text-xs px-4 py-2.5"><Save size={14} /> Save draft</button></div>
             </form>
-          </div>
+          </aside>
         </div>
       )}
 
